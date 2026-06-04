@@ -2,32 +2,56 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request) {
   try {
-    const { currentCode, instruction } = await request.json();
+    const { instruction, repositoryStructure, contextFiles, modelSelection } = await request.json();
     const apiKey = process.env.GEMINI_API_KEY; 
 
     if (!apiKey) {
-      return NextResponse.json({ error: 'Missing API Credentials Configuration' }, { status: 500 });
+      return NextResponse.json({ error: 'Missing API Key configuration' }, { status: 500 });
     }
 
-    const systemContext = `You are the backend automation compilation layer for the YouthDevs Vibe IDE. 
-Your single job is to read the current source code and alter it following the instruction provided by the user.
+    const activeEngineModel = modelSelection || 'gemini-3.1-flash-lite';
 
-CRITICAL IMPLEMENTATION RULES:
-1. Return ONLY valid text source modifications.
-2. Do NOT format your final response with markdown fences blocks like \`\`\`html or structural commentary text.
-3. Keep structural CDN integrations like Tailwind styles un-compromised unless explicit instruction overrides are targeted.
-4. Output should start directly with the modified document format (e.g. <!DOCTYPE html>).`;
+    const systemContext = `You are an automated filesystem compiler agent with full structural write, create, and delete privileges over this repository.
+You are given the structure of the project ([REPOSITORY MAP]), the contents of user selected context modules ([ATTACHED FILE CONTENT]), and a workspace instruction ([USER INSTRUCTION]).
+
+CRITICAL INSTRUCTION ACTION RULES:
+1. "update": If the user requests alterations to an existing file name, return action "update" with its rewritten content.
+2. "create": If the instruction calls for building a feature that requires a brand new file, return action "create" along with the new file's fully developed starting code.
+3. "delete": If the user explicitly asks to drop, delete, remove, or destroy a specific file, return action "delete" for that file name. Content string for a delete action can be left blank.
+4. Keep file generation lean and return structural JSON parameters only. Do NOT include markdown styling wrappers or fences like \`\`\`json.
+
+OUTPUT STRUCTURE SPECIFICATION:
+{
+  "filePatches": [
+    {
+      "name": "filename.extension",
+      "action": "create" | "update" | "delete",
+      "content": "Complete file content payload (Required for create and update actions)"
+    }
+  ]
+}`;
+
+    const promptPayload = `
+${systemContext}
+
+[REPOSITORY MAP]:
+${JSON.stringify(repositoryStructure, null, 2)}
+
+[ATTACHED FILE CONTENT]:
+${JSON.stringify(contextFiles, null, 2)}
+
+[USER INSTRUCTION]:
+${instruction}
+
+RESPONSE JSON:`;
 
     const payload = {
       contents: [{
-        parts: [{
-          text: `${systemContext}\n\n[CURRENT CODE]:\n${currentCode}\n\n[USER INSTRUCTION]:\n${instruction}`
-        }]
+        parts: [{ text: promptPayload }]
       }]
     };
 
-    // 🚀 FIXED: Pointing directly to the active stable version of Gemini 2.5 Flash
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1/models/${activeEngineModel}:generateContent?key=${apiKey}`;
     
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -37,23 +61,25 @@ CRITICAL IMPLEMENTATION RULES:
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error("Google API Server rejected the request:", errorData);
-      return NextResponse.json({ error: 'Google API rejection status' }, { status: response.status });
+      return NextResponse.json({ error: `Gemini Agent Error: ${errorData}` }, { status: response.status });
     }
 
     const data = await response.json();
     let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    let cleanCode = rawText.trim();
-    if (cleanCode.startsWith('```html')) {
-      cleanCode = cleanCode.replace(/^```html\s*/, '').replace(/\s*```$/, '');
-    } else if (cleanCode.startsWith('```')) {
-      cleanCode = cleanCode.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    let cleanJsonString = rawText.trim();
+    if (cleanJsonString.startsWith('```json')) {
+      cleanJsonString = cleanJsonString.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (cleanJsonString.startsWith('```')) {
+      cleanJsonString = cleanJsonString.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
 
-    return NextResponse.json({ updatedCode: cleanCode.trim() });
+    const parsedData = JSON.parse(cleanJsonString.trim());
+    return NextResponse.json({ filePatches: parsedData.filePatches });
+
   } catch (error) {
-    console.error('Server Internal Vibe Exception:', error);
-    return NextResponse.json({ error: 'Internal operational crash' }, { status: 500 });
+    // 🚀 FIXED: Added the missing closing quote and parentheses right here!
+    console.error('Agent route mapping crash:', error);
+    return NextResponse.json({ error: 'System architecture payload format mismatch.' }, { status: 500 });
   }
 }
