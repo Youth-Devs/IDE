@@ -3,9 +3,8 @@ import { NextResponse } from 'next/server';
 export async function POST(request) {
   try {
     const { currentCode, instruction } = await request.json();
-
-    // Ensure your environment key is specified inside your local .env file
     const apiKey = process.env.GEMINI_API_KEY; 
+
     if (!apiKey) {
       return NextResponse.json({ error: 'Missing API Credentials Configuration' }, { status: 500 });
     }
@@ -27,7 +26,8 @@ CRITICAL IMPLEMENTATION RULES:
       }]
     };
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // 🚀 FIXED: Pointing directly to the active stable version of Gemini 2.5 Flash
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -35,10 +35,15 @@ CRITICAL IMPLEMENTATION RULES:
       body: JSON.stringify(payload)
     });
 
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Google API Server rejected the request:", errorData);
+      return NextResponse.json({ error: 'Google API rejection status' }, { status: response.status });
+    }
+
     const data = await response.json();
     let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // Clean any accidental markdown fence formatting wrappers injected by the LLM
     let cleanCode = rawText.trim();
     if (cleanCode.startsWith('```html')) {
       cleanCode = cleanCode.replace(/^```html\s*/, '').replace(/\s*```$/, '');

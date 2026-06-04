@@ -161,20 +161,24 @@ export default function IdeWorkspace() {
           </div>
           <div className="flex-1 w-full overflow-hidden bg-[#1e1e1e]">
             <Editor
-              height="100%"
-              defaultLanguage="html"
-              theme="vs-dark"
-              value={currentCode}
-              onChange={(val) => setCurrentCode(val || '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                wordWrap: "on",
-                automaticLayout: true,
-                padding: { top: 12, bottom: 12 },
-                fontFamily: "var(--font-mono), Menlo, Monaco, Consolas, monospace",
-                lineHeight: 20,
-              }}
+                height="100%"
+                defaultLanguage="html"
+                theme="vs-dark"
+                value={currentCode}
+                onChange={(val) => setCurrentCode(val || '')}
+                options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    wordWrap: "on",
+                    automaticLayout: true,
+                    padding: { top: 12, bottom: 12 },
+                    fontFamily: "var(--font-mono), Menlo, Monaco, Consolas, monospace",
+                    lineHeight: 20,
+                    // 🚀 THE TAB SPACER FIXES:
+                    tabSize: 2,
+                    insertSpaces: true,
+                    detectIndentation: false
+                }}
             />
           </div>
         </section>
