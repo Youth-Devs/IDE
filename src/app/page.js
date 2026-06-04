@@ -129,37 +129,38 @@ export default function IdeWorkspace() {
       </header>
 
       {/* 2. THE THREE-PANEL WORKSPACE GRID (EXACTLY FITS REMAINDER OF SCREEN) */}
-      <main className="flex flex-1 w-full overflow-hidden min-h-0">
+      {/* 2. THE THREE-PANEL WORKSPACE GRID */}
+      <main className="flex flex-1 w-full overflow-hidden min-h-0 bg-slate-950">
         
-        {/* PANEL A: LEFT PLAYBOOK SIDEBAR */}
-        <section className="w-64 border-r border-slate-800/80 bg-slate-900/20 flex flex-col h-full shrink-0">
-          <div className="p-3 border-b border-slate-800/60 bg-slate-900/40 flex items-center gap-2">
+        {/* PANEL A: LEFT PLAYBOOK SIDEBAR (DRAGGABLE TO THE RIGHT) */}
+        <section className="w-64 min-w-[200px] max-w-[450px] border-r border-slate-800/80 bg-slate-900/20 flex flex-col h-full shrink-0 horizontal-resize overflow-x-hidden">
+            <div className="p-3 border-b border-slate-800/60 bg-slate-900/40 flex items-center gap-2 shrink-0">
             <LayoutGrid size={14} className="text-indigo-400" />
             <span className="text-xs font-bold tracking-wider uppercase text-slate-400">Playbook Guide</span>
-          </div>
-          <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-3 custom-scrollbar">
+            </div>
+            <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-3 custom-scrollbar">
             <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl text-xs leading-relaxed shadow-sm">
-              <span className="font-bold text-indigo-400 block mb-1">🚀 01 / Prompt Engineering</span>
-              Use the conversational frame at the bottom of the screen to describe layouts, buttons, or dynamic interfaces.
+                <span className="font-bold text-indigo-400 block mb-1">🚀 01 / Prompt Engineering</span>
+                Use the conversational frame at the bottom of the screen to describe layouts, buttons, or dynamic interfaces.
             </div>
             <div className="p-3 bg-slate-900/40 border border-slate-800/40 rounded-xl text-xs leading-relaxed text-slate-400">
-              <span className="font-bold text-slate-400 block mb-1">📁 02 / Local Mounting</span>
-              Mount a file using the header utility bar to pull static code directly from your desktop.
+                <span className="font-bold text-slate-400 block mb-1">📁 02 / Local Mounting</span>
+                Mount a file using the header utility bar to pull static code directly from your desktop.
             </div>
-          </div>
+            </div>
         </section>
 
-        {/* PANEL B: MIDDLE CODE TEXT EDITOR */}
-        <section className="flex-1 flex flex-col bg-slate-950 h-full border-r border-slate-800/80 min-w-0">
-          <div className="bg-slate-900/40 h-9 px-4 border-b border-slate-800/60 flex items-center justify-between shrink-0">
+        {/* PANEL B: MIDDLE CODE TEXT EDITOR (DRAGGABLE TO THE RIGHT) */}
+        <section className="flex-1 min-w-[300px] flex flex-col bg-slate-950 h-full border-r border-slate-800/80 horizontal-resize overflow-x-hidden">
+            <div className="bg-slate-900/40 h-9 px-4 border-b border-slate-800/60 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-              <span className="text-xs font-mono tracking-tight text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span className="text-xs font-mono tracking-tight text-slate-400">
                 {fileHandle ? fileHandle.name : 'sandbox.html'}
-              </span>
+                </span>
             </div>
-          </div>
-          <div className="flex-1 w-full overflow-hidden bg-[#1e1e1e]">
+            </div>
+            <div className="flex-1 w-full overflow-hidden bg-[#1e1e1e]">
             <Editor
                 height="100%"
                 defaultLanguage="html"
@@ -167,40 +168,41 @@ export default function IdeWorkspace() {
                 value={currentCode}
                 onChange={(val) => setCurrentCode(val || '')}
                 options={{
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    wordWrap: "on",
-                    automaticLayout: true,
-                    padding: { top: 12, bottom: 12 },
-                    fontFamily: "var(--font-mono), Menlo, Monaco, Consolas, monospace",
-                    lineHeight: 20,
-                    // 🚀 THE TAB SPACER FIXES:
-                    tabSize: 2,
-                    insertSpaces: true,
-                    detectIndentation: false
+                minimap: { enabled: false },
+                fontSize: 15,
+                wordWrap: "off",
+                automaticLayout: true,
+                padding: { top: 12, bottom: 12 },
+                fontFamily: "Consolas, 'Courier New', Courier, monospace",
+                fontLigatures: false,
+                lineHeight: 22,
+                tabSize: 4,
+                insertSpaces: true,
+                detectIndentation: false,
+                scrollbar: { horizontal: 'auto', horizontalScrollbarSize: 10 }
                 }}
             />
-          </div>
+            </div>
         </section>
 
-        {/* PANEL C: RIGHT REFRESH PREVIEW DEVICE */}
-        <section className="flex-1 flex flex-col bg-slate-900 h-full min-w-0">
-          <div className="bg-slate-900/40 h-9 px-4 border-b border-slate-800/60 flex items-center justify-between shrink-0">
+        {/* PANEL C: RIGHT REFRESH PREVIEW DEVICE (FILLS THE REMAINING SPACE) */}
+        <section className="flex-1 min-w-[200px] flex flex-col bg-slate-900 h-full">
+            <div className="bg-slate-900/40 h-9 px-4 border-b border-slate-800/60 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
-              <Play size={12} className="text-emerald-400 fill-emerald-400" />
-              <span className="text-xs font-semibold tracking-wide text-slate-400">Live Preview Environment</span>
+                <Play size={12} className="text-emerald-400 fill-emerald-400" />
+                <span className="text-xs font-semibold tracking-wide text-slate-400">Live Preview Environment</span>
             </div>
-          </div>
-          <div className="flex-1 w-full bg-white relative">
+            </div>
+            <div className="flex-1 w-full bg-white relative">
             <iframe
-              title="Live Preview Sandbox"
-              srcDoc={currentCode}
-              sandbox="allow-scripts"
-              className="absolute inset-0 w-full h-full border-none m-0 p-0"
+                title="Live Preview Sandbox"
+                srcDoc={currentCode}
+                sandbox="allow-scripts"
+                className="absolute inset-0 w-full h-full border-none m-0 p-0"
             />
-          </div>
+            </div>
         </section>
-      </main>
+        </main>
 
       {/* 3. ALIGNED BOTTOM AI PROMPT FOOTER PANEL */}
       <footer className="h-20 border-t border-slate-800 bg-slate-900/40 backdrop-blur-md px-6 flex items-center justify-center shrink-0 z-10">

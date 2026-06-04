@@ -2,3 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom styling to enable native draggable window splitters */
+.horizontal-resize {
+  resize: horizontal !important;
+  overflow: auto !important;
+}
+
+/* Optional styling to make the drag handle indicator clean and visible */
+.horizontal-resize::-webkit-resizer {
+  background-image: linear-gradient(135deg, transparent 50%, #4f46e5 50%);
+  background-size: 10px 10px;
+  background-repeat: no-repeat;
+  background-position: bottom right;
+  cursor: ew-resize;
+}
