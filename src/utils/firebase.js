@@ -3,13 +3,13 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPasswor
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBJy-hyVkVuNH-kYnpgBgYOm7nHAXBsuNA",
-  authDomain: "youthdevside.firebaseapp.com",
-  projectId: "youthdevside",
-  storageBucket: "youthdevside.firebasestorage.app",
-  messagingSenderId: "1042385148804",
-  appId: "1:1042385148804:web:b2100d4e758898046e5bd1",
-  measurementId: "G-DLP2BQ9YQT"
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.NEXT_PUBLIC_MEASUREMENT_ID
 };
 
 // 🔍 CRITICAL RUNTIME CHECK: Log key status directly to your browser's inspect console
