@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, ArrowLeft, LogIn, Sun, Moon, Users } from 'lucide-react';
+import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, ArrowLeft, LogIn, Sun, Moon, Users, UserPlus } from 'lucide-react';
 
 // Firebase Connectors
 import { auth, db, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from '../utils/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, addDoc, getDocs, query, where, updateDoc, setDoc, onSnapshot, serverTimestamp, getCountFromServer } from 'firebase/firestore';
+import { collection, doc, addDoc, getDocs, query, where, updateDoc, setDoc, onSnapshot, serverTimestamp, getCountFromServer, arrayUnion } from 'firebase/firestore';
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
@@ -25,6 +25,11 @@ export default function App() {
   const [currentProjectId, setCurrentProjectId] = useState(null); 
   const [projects, setProjects] = useState([]);
   const [newProjectName, setNewProjectName] = useState('');
+  const [dashboardError, setDashboardError] = useState(''); // 🚀 Added to catch and display database permission errors
+  
+  // Teammate Invitation Input State
+  const [teammateEmailInput, setTeammateEmailInput] = useState('');
+  const [inviteStatus, setInviteStatus] = useState('');
 
   // Core IDE Project States
   const [files, setFiles] = useState([]);
@@ -40,17 +45,17 @@ export default function App() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [lastModelUsed, setLastModelUsed] = useState(null);
 
-  // 🚀 LIGHT / DARK THEME STATE (Persisted in LocalStorage)
+  // Theme State
   const [theme, setTheme] = useState('dark');
 
-  // 🚀 REGISTERED USER STATS STATE
+  // Registered Users Global Statistics
   const [totalUsers, setTotalUsers] = useState(0);
 
   // Layout & Console Utilities
   const [promptInput, setPromptInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [consoleLogs, setConsoleLogs] = useState([
-    'SYSTEM: YouthDevs Workspace Initialization Layer Online.'
+    'SYSTEM: YouthDevs Workspace Real-Time Team Layer Online.'
   ]);
 
   const [leftWidth, setLeftWidth] = useState(240); 
@@ -63,8 +68,9 @@ export default function App() {
   const consoleBottomRef = useRef(null);
 
   const currentActiveFile = files.find(f => f.id === activeFileId) || files[0];
+  const activeProjectData = projects.find(p => p.id === currentProjectId);
 
-  // 1. Theme Initialization Layer
+  // Theme Initialization Layer
   useEffect(() => {
     const savedTheme = localStorage.getItem('ide-theme');
     if (savedTheme) {
@@ -78,13 +84,12 @@ export default function App() {
     localStorage.setItem('ide-theme', nextTheme);
   };
 
-  // 2. Auth Listener Connection Hook
+  // Auth Listener Connection Hook
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
       if (!currentUser) {
-        // Reset local views when logged out
         setCurrentProjectId(null);
         setProjects([]);
       }
@@ -92,11 +97,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 3. Fetch User Projects, Global limits, & Total User Count Statistics
+  // Fetch User Projects via Collaborative Team Membership Arrays
   useEffect(() => {
     if (!user) return;
 
-    // A. Keep tabs on User Account Profile Document for Persistent Supercharge metrics
     const userProfileRef = doc(db, 'users', user.uid);
     const unsubProfile = onSnapshot(userProfileRef, async (docSnap) => {
       if (docSnap.exists()) {
@@ -104,26 +108,23 @@ export default function App() {
         setSuperchargeUses(data.superchargeUses || 0);
         setCooldownEndTime(data.cooldownEndTime || null);
       } else {
-        // Create the user profile doc if it doesn't exist yet for brand new accounts
         try {
-          await setDoc(userProfileRef, { superchargeUses: 0, cooldownEndTime: null }, { merge: true });
+          await setDoc(userProfileRef, { email: user.email, superchargeUses: 0, cooldownEndTime: null }, { merge: true });
         } catch (err) {
           console.error("Failed to initialize user document:", err);
         }
       }
-      // Re-trigger live users statistics query after registration state verifies
       fetchTotalUsersCount();
     });
 
-    // B. Fetch associated working repositories 
-    const q = query(collection(db, 'projects'), where('userId', '==', user.uid));
+    // TEAM ACCOMMODATION: Query all projects where user.uid is contained inside memberUids array
+    const q = query(collection(db, 'projects'), where('memberUids', 'array-contains', user.uid));
     const unsubProjects = onSnapshot(q, (snapshot) => {
       const projs = [];
       snapshot.forEach(doc => projs.push({ id: doc.id, ...doc.data() }));
       setProjects(projs);
     });
 
-    // C. Live total count initializer
     fetchTotalUsersCount();
 
     return () => {
@@ -132,20 +133,28 @@ export default function App() {
     };
   }, [user]);
 
-  // 4. Query Total Users Efficiently via Metadata Count API
-  const fetchTotalUsersCount = async () => {
-    try {
-      const coll = collection(db, 'users');
-      const snapshot = await getCountFromServer(coll);
-      setTotalUsers(snapshot.data().count ?? 0);
-    } catch (err) {
-      // 🚀 ROBUST FALLBACK: If Security Rules block counting /users directly, fall back gracefully to 1
-      console.warn("Firestore list rules blocked counting users. Falling back gracefully. Error:", err.message);
-      setTotalUsers(1); 
-    }
-  };
+  // Sync Live Workspace Presence Matrix 
+  useEffect(() => {
+    if (!currentProjectId || !user || !activeFileId) return;
 
-  // 5. Real-Time Active File Array Sync Node
+    const projectRef = doc(db, 'projects', currentProjectId);
+    const dynamicPresenceKey = `presence.${activeFileId}`;
+    const userHandle = user.email ? user.email.split('@')[0] : 'anonymous';
+
+    // Mark current user as active editor of this specific file index
+    updateDoc(projectRef, {
+      [dynamicPresenceKey]: userHandle
+    }).catch(err => console.error("Presence sync failed:", err));
+
+    return () => {
+      // Clear presence markers when navigating away or switching files
+      updateDoc(projectRef, {
+        [dynamicPresenceKey]: null
+      }).catch(() => {});
+    };
+  }, [activeFileId, currentProjectId, user]);
+
+  // Real-Time Active File Array Sync Node
   useEffect(() => {
     if (!user || !currentProjectId) return;
 
@@ -164,6 +173,18 @@ export default function App() {
 
     return () => unsubProjectFiles();
   }, [user, currentProjectId]);
+
+  // Query Total Users Count
+  const fetchTotalUsersCount = async () => {
+    try {
+      const coll = collection(db, 'users');
+      const snapshot = await getCountFromServer(coll);
+      setTotalUsers(snapshot.data().count ?? 0);
+    } catch (err) {
+      console.warn("Firestore list rules blocked counting users. Falling back gracefully. Error:", err.message);
+      setTotalUsers(1); 
+    }
+  };
 
   // Cooldown countdown tracking routine
   useEffect(() => {
@@ -235,10 +256,11 @@ export default function App() {
     }
   };
 
-  // --- PROJECT MANAGEMENT ---
+  // --- PROJECT SETUP FOR COLLABORATIVE TEAMS ---
   const handleCreateProject = async (e) => {
     e.preventDefault();
     if (!newProjectName.trim() || !user) return;
+    setDashboardError(''); // Clear old dashboard errors
 
     const defaultFiles = [
       {
@@ -253,7 +275,7 @@ export default function App() {
 <body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
   <div class="text-center p-6 bg-slate-800 rounded-xl">
     <h1 class="text-2xl font-bold text-indigo-400">${newProjectName}</h1>
-    <p class="text-xs text-slate-400 mt-2">Vibe engine standing by.</p>
+    <p class="text-xs text-slate-400 mt-2">Workspace online. Happy hackathon coding!</p>
   </div>
 </body>
 </html>`
@@ -263,13 +285,67 @@ export default function App() {
     try {
       await addDoc(collection(db, 'projects'), {
         name: newProjectName.trim(),
-        userId: user.uid,
+        userId: user.uid, // 🚀 KEY COMPATIBILITY ANCHOR: Keeps old Firestore security rules working!
+        memberUids: [user.uid], // Array tracking membership for up to 3 teammates
+        memberEmails: [user.email || 'anonymous'], 
+        presence: {},          // Live tracking map for workspaces files
         files: defaultFiles,
         createdAt: serverTimestamp()
       });
       setNewProjectName('');
     } catch (err) {
       console.error(err);
+      setDashboardError(err.message || 'Permission denied. Make sure your Firestore rules match your project schema!');
+    }
+  };
+
+  // --- ADD TEAMMATE PIPELINE RUNNER ---
+  const handleAddTeammateSubmit = async (e) => {
+    e.preventDefault();
+    setInviteStatus('');
+    const targetEmail = teammateEmailInput.trim().toLowerCase();
+    const userEmailSafe = user.email ? user.email.toLowerCase() : '';
+    
+    if (!targetEmail || !currentProjectId) return;
+    if (targetEmail === userEmailSafe) {
+      setInviteStatus('You are already the project owner.');
+      return;
+    }
+    if (activeProjectData?.memberEmails?.map(m => m.toLowerCase()).includes(targetEmail)) {
+      setInviteStatus('User is already added to this project.');
+      return;
+    }
+    if (activeProjectData?.memberUids?.length >= 3) {
+      setInviteStatus('Team capacity full! Maximum 3 developers per project container.');
+      return;
+    }
+
+    try {
+      // Find the teammate's user profile by querying their registered email address
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', targetEmail));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        setInviteStatus('Teammate profile not found. Have them sign in to YouthDevs once first!');
+        return;
+      }
+
+      const teammateDoc = querySnapshot.docs[0];
+      const teammateUid = teammateDoc.id;
+
+      // Add the teammate's information to the project document
+      const projectRef = doc(db, 'projects', currentProjectId);
+      await updateDoc(projectRef, {
+        memberUids: arrayUnion(teammateUid),
+        memberEmails: arrayUnion(targetEmail)
+      });
+
+      setInviteStatus('Teammate synced successfully!');
+      setTeammateEmailInput('');
+    } catch (err) {
+      console.error(err);
+      setInviteStatus('Error appending team credentials.');
     }
   };
 
@@ -428,7 +504,7 @@ export default function App() {
         setConsoleLogs(prev => [...prev, ...actionLogs.map(l => `SUCCESS: ${l}`), 'COMPLETED: AI patch generation cycle finished.']);
         setPromptInput('');
 
-        // PERSISTENT SUPERCHARGE TOKEN COUNT UPDATES
+        // Token metric tracking updates
         if (isSupercharged) {
           const nextCount = superchargeUses + 1;
           const userRef = doc(db, 'users', user.uid);
@@ -455,7 +531,6 @@ export default function App() {
     }
   };
 
-  // 🚀 Helper to format seconds as mm:ss
   const formatTime = (secs) => {
     const mins = Math.floor(secs / 60);
     const remainingSecs = secs % 60;
@@ -479,7 +554,6 @@ export default function App() {
           <div className="flex items-center justify-between mb-4">
             <div className="h-10 w-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-lg">Y</div>
             
-            {/* Theme Toggle on Login Page */}
             <button 
               onClick={toggleTheme} 
               className={`p-2 rounded-lg border transition-all ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-850' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
@@ -544,16 +618,14 @@ export default function App() {
             <span className={`text-xs font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>YouthDevs Central Hub</span>
           </div>
           <div className="flex items-center gap-4">
-            {/* 🚀 Active Users Indicator Stat (Dashboard View) */}
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border ${theme === 'dark' ? 'bg-indigo-950/30 border-indigo-900/40 text-indigo-400' : 'bg-indigo-50 border-indigo-100 text-indigo-600'}`}>
               <Users size={12} />
               <span>IDE Users: <b className="font-mono font-bold">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
             </div>
 
-            {/* Theme Toggle (Dashboard View) */}
             <button 
               onClick={toggleTheme} 
-              className={`p-2 rounded-lg border transition-all ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+              className={`p-2 rounded-lg border transition-all ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-850' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
               title="Toggle system theme"
             >
               {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
@@ -568,13 +640,13 @@ export default function App() {
 
         <main className="flex-1 max-w-4xl w-full mx-auto p-6 md:p-10 overflow-y-auto">
           <div className={`border p-6 rounded-2xl mb-8 transition-colors ${theme === 'dark' ? 'bg-gradient-to-r from-indigo-950/40 to-slate-900 border-slate-800/80' : 'bg-gradient-to-r from-indigo-50/50 to-white border-slate-200'}`}>
-            <h2 className={`text-xl font-black ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Welcome Back to Cloud Core</h2>
-            <p className={`text-xs mt-1 max-w-lg ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Build, update, and deploy multi-file codebases natively stored in Firestore containers. The global AI Supercharge token limit persists across all active instances.</p>
+            <h2 className={`text-xl font-black ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Welcome Back to Hackathon Core</h2>
+            <p className={`text-xs mt-1 max-w-lg ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>Build collaborative multi-file web applications natively with your team of up to 3 members. Each user maintains their individual personal AI prompt limit.</p>
             
             <form onSubmit={handleCreateProject} className="mt-4 flex gap-2 max-w-md">
               <input 
                 type="text" 
-                placeholder="New app template name (e.g., dashboard-ui)..." 
+                placeholder="New project or repository name..." 
                 value={newProjectName} 
                 onChange={e => setNewProjectName(e.target.value)} 
                 required 
@@ -584,22 +656,35 @@ export default function App() {
                 <Plus size={14} /> Create Repo
               </button>
             </form>
+
+            {/* 🚀 Dashboard Error Panel displaying Firestore Permission issues beautifully */}
+            {dashboardError && (
+              <p className="text-xs text-rose-400 font-mono mt-3 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg animate-shake">
+                ⚠️ {dashboardError}
+              </p>
+            )}
           </div>
 
-          <h3 className={`text-xs font-bold uppercase tracking-widest mb-3 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>Your Persistent Projects</h3>
+          <h3 className={`text-xs font-bold uppercase tracking-widest mb-3 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>Shared Team Repositories</h3>
           {projects.length === 0 ? (
-            <div className={`text-center py-12 border border-dashed rounded-xl text-xs font-mono ${theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-300 text-slate-400'}`}>No active projects found. Type a title above to spawn your first cloud node container.</div>
+            <div className={`text-center py-12 border border-dashed rounded-xl text-xs font-mono ${theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-slate-300 text-slate-400'}`}>No active projects found. Type a title above to spawn your team repository.</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {projects.map(proj => (
-                <div key={proj.id} onClick={() => { setCurrentProjectId(proj.id); setFiles([]); setActiveFileId(''); }} className={`p-4 border rounded-xl cursor-pointer transition-all group ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/40 text-slate-300' : 'bg-white border-slate-200 hover:border-indigo-500/45 text-slate-700 shadow-sm hover:shadow'}`}>
-                  <div className="flex items-center gap-2.5 font-bold text-sm group-hover:text-indigo-500 transition-colors">
-                    <Folder size={16} className="text-indigo-500" />
-                    {proj.name}
+                <div key={proj.id} onClick={() => { setCurrentProjectId(proj.id); setFiles([]); setActiveFileId(''); setInviteStatus(''); }} className={`p-4 border rounded-xl cursor-pointer transition-all group ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-indigo-500/40 text-slate-300' : 'bg-white border-slate-200 hover:border-indigo-500/45 text-slate-700 shadow-sm hover:shadow'}`}>
+                  <div className="flex items-center justify-between font-bold text-sm group-hover:text-indigo-500 transition-colors">
+                    <div className="flex items-center gap-2.5">
+                      <Folder size={16} className="text-indigo-500" />
+                      {proj.name}
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] text-slate-400 bg-slate-500/10 px-1.5 py-0.5 rounded">
+                      <Users size={10} />
+                      <span>{proj.memberUids?.length || 1}/3</span>
+                    </div>
                   </div>
                   <div className={`flex justify-between items-center mt-4 text-[10px] font-mono ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>
-                    <span>Files Tracked: {proj.files?.length || 0}</span>
-                    <span className="text-indigo-500 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">Open Workspace <ChevronRight size={10} /></span>
+                    <span className="truncate max-w-[150px]">Members: {proj.memberEmails?.map(m => m.split('@')[0]).join(', ')}</span>
+                    <span className="text-indigo-500 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all shrink-0">Open Workspace <ChevronRight size={10} /></span>
                   </div>
                 </div>
               ))}
@@ -616,28 +701,44 @@ export default function App() {
       
       {/* HEADER SECTION */}
       <header className={`flex h-14 items-center justify-between px-4 border-b z-10 shrink-0 transition-colors ${theme === 'dark' ? 'border-slate-800 bg-slate-900/60 backdrop-blur-md' : 'border-slate-200 bg-white/95'}`}>
-        <div className="flex items-center gap-3">
-          <button onClick={() => setCurrentProjectId(null)} className={`p-1.5 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-800'}`} title="Return to Dashboard">
+        <div className="flex items-center gap-3 max-w-[40%]">
+          <button onClick={() => setCurrentProjectId(null)} className={`p-1.5 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-850'}`} title="Return to Dashboard">
             <ArrowLeft size={14} />
           </button>
           <div className={`h-5 w-px ${theme === 'dark' ? 'bg-slate-800' : 'bg-slate-200'}`} />
-          <span className="font-bold text-xs tracking-wider bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent uppercase font-mono">
-            Repo: {projects.find(p => p.id === currentProjectId)?.name}
+          <span className="font-bold text-xs tracking-wider bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent uppercase font-mono truncate">
+            {activeProjectData?.name}
           </span>
+          
+          {/* Active Members In This Workspace Repo */}
+          <div className={`hidden md:flex items-center gap-1 text-[10px] text-slate-400 px-2 py-0.5 rounded font-mono border ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-200/50 border-slate-300'}`}>
+            <span>Team: {activeProjectData?.memberEmails?.map(m => m.split('@')[0]).join(', ')}</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          
-          {/* 🚀 Active Users Indicator Stat (Workspace View) */}
-          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${theme === 'dark' ? 'bg-indigo-950/30 border-indigo-900/40 text-indigo-400' : 'bg-indigo-50 border-indigo-100 text-indigo-600'}`}>
-            <Users size={11} />
-            <span>IDE Users: <b className="font-mono">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
-          </div>
+        {/* TEAM ACCOMMODATION: Add Teammate Overlay Feature */}
+        <div className="flex items-center gap-3">
+          <form onSubmit={handleAddTeammateSubmit} className="hidden lg:flex items-center gap-1 border rounded-lg p-1 text-xs bg-slate-950/30 border-slate-800/80">
+            <input 
+              type="email" 
+              placeholder="Teammate's Email..." 
+              value={teammateEmailInput} 
+              onChange={e => setTeammateEmailInput(e.target.value)} 
+              className="bg-transparent px-2 py-0.5 text-[11px] outline-none border-none font-mono text-slate-300 w-36"
+            />
+            <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white p-1 rounded transition flex items-center justify-center" title="Invite Teammate">
+              <UserPlus size={12} />
+            </button>
+          </form>
+          {inviteStatus && (
+            <span className="hidden lg:inline text-[9px] font-mono text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded max-w-[120px] truncate">
+              {inviteStatus}
+            </span>
+          )}
 
-          {/* 🚀 System Light / Dark Mode Toggle Button */}
           <button 
             onClick={toggleTheme} 
-            className={`p-2 rounded-lg border transition-all ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-800' : 'border-slate-200 text-slate-500 hover:bg-slate-100'}`}
+            className={`p-2 rounded-lg border transition-all ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
             title="Toggle system theme"
           >
             {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
@@ -646,9 +747,9 @@ export default function App() {
           {/* Supercharge Status */}
           <div className={`flex items-center gap-3 border px-3 py-1 rounded-xl transition-colors ${theme === 'dark' ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
             <div className="flex flex-col text-right">
-              <span className="text-[10px] font-bold uppercase tracking-tight">Supercharge Engine</span>
+              <span className="text-[10px] font-bold uppercase tracking-tight">Supercharge</span>
               <span className="text-[9px] font-mono text-slate-500">
-                {cooldownEndTime ? `Cooldown: ${formatTime(secondsLeft)}` : `Tokens: ${10 - superchargeUses}/10 Left`}
+                {cooldownEndTime ? `Lock: ${formatTime(secondsLeft)}` : `Left: ${10 - superchargeUses}/10`}
               </span>
             </div>
             <button
@@ -665,7 +766,7 @@ export default function App() {
 
       <main className="flex flex-1 w-full overflow-hidden relative min-h-0">
         
-        {/* EXPLORER TREE VIEW PANEL */}
+        {/* EXPLORER TREE VIEW PANEL WITH LIVE PRESENCE BADGES */}
         <section style={{ width: `${leftWidth}px` }} className={`border-r flex flex-col h-full shrink-0 overflow-hidden transition-colors ${theme === 'dark' ? 'border-slate-800/80 bg-slate-900/20' : 'border-slate-200 bg-slate-50'}`}>
           <div className={`p-3 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'border-slate-800/60 bg-slate-900/40 text-slate-400' : 'border-slate-200 bg-slate-200/45 text-slate-600'}`}>
             <span className="text-xs font-bold tracking-wider uppercase">Filesystem</span>
@@ -679,20 +780,32 @@ export default function App() {
             )}
             {files.map(file => {
               const isActive = file.id === activeFileId;
+              
+              // Presence detection lookups
+              const currentFileViewer = activeProjectData?.presence?.[file.id];
+              const isTeammateActiveHere = currentFileViewer && currentFileViewer !== (user.email ? user.email.split('@')[0] : 'anonymous');
+
               return (
                 <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer group text-xs font-mono border transition-all ${
                   isActive 
                     ? theme === 'dark' ? 'bg-indigo-600/15 border-indigo-500/20 text-slate-100 font-semibold' : 'bg-indigo-50 border-indigo-200 text-indigo-600 font-semibold'
                     : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/40 border-transparent' : 'text-slate-600 hover:bg-slate-200/50 border-transparent'
                 }`}>
-                  <div className="flex items-center gap-2 overflow-hidden">
+                  <div className="flex items-center gap-2 overflow-hidden flex-1 mr-1">
                     <div onClick={(e) => { e.stopPropagation(); selectedContextIds.includes(file.id) ? setSelectedContextIds(selectedContextIds.filter(id => id !== file.id)) : setSelectedContextIds([...selectedContextIds, file.id]) }} className={`hover:text-indigo-500 transition-colors p-0.5 ${theme === 'dark' ? 'text-slate-600' : 'text-slate-400'}`}>
                       {selectedContextIds.includes(file.id) ? <CheckSquare size={13} className="text-indigo-500" /> : <Square size={13} />}
                     </div>
                     <FileCode size={13} className="shrink-0" />
                     <span className="truncate">{file.name}</span>
                   </div>
-                  <X size={11} className={`opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500`} onClick={e => handleCloseFile(file.id, e)} />
+                  
+                  {/* Real-time Team Member Edit Badge */}
+                  {isTeammateActiveHere && (
+                    <span className="text-[8px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1 rounded scale-90 tracking-tighter uppercase shrink-0 animate-pulse">
+                      {currentFileViewer}
+                    </span>
+                  )}
+                  <X size={11} className={`opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500 shrink-0 ml-1`} onClick={e => handleCloseFile(file.id, e)} />
                 </div>
               );
             })}
@@ -702,7 +815,7 @@ export default function App() {
         {/* DRAG HANDLER 1 */}
         <div className={`w-1.5 h-full cursor-ew-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 shrink-0`} onMouseDown={() => { isResizingLeft.current = true; }} />
 
-        {/* INTEGRATED CODE EDITOR */}
+        {/* CODE EDITOR WINDOW */}
         <section style={{ width: `${centerWidth}px` }} className={`flex flex-col h-full shrink-0 overflow-hidden border-r transition-colors ${theme === 'dark' ? 'bg-slate-950 border-slate-800/80' : 'bg-white border-slate-200'}`}>
           <div className={`h-9 border-b flex items-center overflow-x-auto shrink-0 select-none transition-colors ${theme === 'dark' ? 'bg-slate-900/40 border-slate-800/60' : 'bg-slate-50 border-slate-200'}`}>
             {files.map(file => {
@@ -724,7 +837,7 @@ export default function App() {
               <Editor 
                 height="100%" 
                 language={currentActiveFile.language} 
-                theme={theme === 'dark' ? "vs-dark" : "light"} // 🚀 Swaps Monaco editor theme dynamically!
+                theme={theme === 'dark' ? "vs-dark" : "light"} 
                 value={currentActiveFile.content} 
                 onChange={handleEditorChange} 
                 options={{ minimap: { enabled: false }, fontSize: 14, automaticLayout: true, wordWrap: "on" }} 
@@ -750,7 +863,7 @@ export default function App() {
       {/* DRAG HANDLER 3 */}
       <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-slate-800/50' : 'border-slate-200/50'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
 
-      {/* FOOTER AGENT INTERACT CONSOLE */}
+      {/* FOOTER INTERACT CONSOLE */}
       <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 flex gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-slate-800 bg-slate-900/40 backdrop-blur-md' : 'border-slate-200 bg-white'}`}>
         <div className="flex-1 flex flex-col min-w-0 h-full">
           <div className={`flex items-center gap-1.5 mb-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
