@@ -87,6 +87,11 @@ export default function App() {
   // PROJECT CREATION LOADING STATUS
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [projectStatusMessage, setProjectStatusMessage] = useState('');
+  const [deployProjectName, setDeployProjectName] = useState('');
+  const [isDeployingToVercel, setIsDeployingToVercel] = useState(false);
+  const [deployStatusMessage, setDeployStatusMessage] = useState('');
+  const [deployError, setDeployError] = useState('');
+  const [deployUrl, setDeployUrl] = useState('');
 
   // Teammate Invitation Input State
   const [teammateEmailInput, setTeammateEmailInput] = useState('');
@@ -157,6 +162,13 @@ export default function App() {
     activeFileIdRef.current = activeFileId;
   }, [activeFileId]);
 
+  useEffect(() => {
+    setDeployProjectName(activeProjectData?.name || '');
+    setDeployUrl('');
+    setDeployError('');
+    setDeployStatusMessage('');
+  }, [activeProjectData?.name]);
+
   // Custom setter that persists to sessionStorage so reload doesn't boot them to the dashboard
   const setCurrentProjectId = (id) => {
     setCurrentProjectIdState(id);
@@ -175,6 +187,66 @@ export default function App() {
       const f2 = arr2.find(f => f.name === f1.name);
       return f2 && f2.content === f1.content;
     });
+  };
+
+  const buildVercelFilesPayload = (workspaceFiles) => {
+    return workspaceFiles.map((file) => {
+      const rawPath = file.path || file.name || '';
+      const normalizedPath = String(rawPath).replace(/^\/+/, '');
+      return {
+        file: normalizedPath,
+        data: typeof file.content === 'string' ? file.content : '',
+      };
+    }).filter((file) => file.file);
+  };
+
+  const handleDeployToVercel = async () => {
+    if (isDeployingToVercel) return;
+
+    const projectName = (deployProjectName || activeProjectData?.name || 'hackathon-ide-project').trim();
+    if (!projectName) {
+      setDeployError('Please enter a project name before deploying.');
+      return;
+    }
+    if (!files.length) {
+      setDeployError('Add at least one file before deploying.');
+      return;
+    }
+
+    setIsDeployingToVercel(true);
+    setDeployError('');
+    setDeployUrl('');
+    setDeployStatusMessage('Deploying...');
+
+    try {
+      const payload = {
+        projectName,
+        framework: null,
+        files: buildVercelFilesPayload(files),
+      };
+
+      setDeployStatusMessage('Building...');
+      const response = await fetch('/api/deploy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result?.error || 'Deployment failed.');
+      }
+
+      setDeployUrl(result.url || '');
+      setDeployStatusMessage('Deployment complete.');
+    } catch (error) {
+      setDeployError(error.message || 'Unable to deploy right now.');
+      setDeployStatusMessage('');
+    } finally {
+      setIsDeployingToVercel(false);
+    }
   };
 
   // Theme Initialization Layer
@@ -1886,17 +1958,62 @@ export default function App() {
               })}
             </div>
 
-            {/* ACTION COMPONENT: Commit / Save Push Workspace Change Trigger Button */}
-            {isDirty && (
-              <button 
+          {/* ACTION COMPONENT: Commit / Save Push Workspace Change Trigger Button */}
+          {isDirty && (
+            <button 
                 onClick={() => triggerPushCommitModal(files)}
                 className="flex items-center gap-1 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-md shadow-indigo-650/20 hover:scale-105 animate-pulse"
               >
                 <Save size={12} />
-                <span>{activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Team Change'}</span>
-              </button>
+              <span>{activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Team Change'}</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 mr-2">
+            <input
+              type="text"
+              value={deployProjectName}
+              onChange={(e) => setDeployProjectName(e.target.value)}
+              placeholder="Vercel project name"
+              className={`w-40 text-xs font-mono px-3 py-1.5 rounded-lg border outline-none transition-colors ${
+                theme === 'dark'
+                  ? 'bg-slate-955 border-slate-800 text-slate-200 placeholder-slate-500 focus:border-cyan-500'
+                  : 'bg-white border-slate-300 text-slate-800 placeholder-slate-400 focus:border-cyan-500'
+              }`}
+            />
+            <button
+              onClick={handleDeployToVercel}
+              disabled={isDeployingToVercel || !files.length}
+              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-cyan-650/20"
+            >
+              <Zap size={12} />
+              <span>{isDeployingToVercel ? deployStatusMessage : 'Deploy to Vercel'}</span>
+            </button>
+          </div>
+        </div>
+
+        {(deployStatusMessage || deployError || deployUrl) && (
+          <div className={`px-4 py-2 border-b text-[11px] font-mono ${
+            theme === 'dark' ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-white'
+          }`}>
+            {deployStatusMessage && !deployError && (
+              <span className="text-cyan-400">{deployStatusMessage}</span>
+            )}
+            {deployError && (
+              <span className="text-rose-400">Deploy error: {deployError}</span>
+            )}
+            {deployUrl && (
+              <a
+                href={deployUrl.startsWith('http') ? deployUrl : `https://${deployUrl}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-400 hover:underline break-all"
+              >
+                Live deployment: {deployUrl}
+              </a>
             )}
           </div>
+        )}
 
           <div className="flex-1 w-full overflow-hidden bg-[#1e1e1e] relative">
             {!monacoLoaded ? (
