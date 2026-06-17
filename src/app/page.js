@@ -53,7 +53,8 @@ const decodeBase64Utf8 = (str) => {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authBootError, setAuthBootError] = useState('');
   
   // Auth Form State
   const [email, setEmail] = useState('');
@@ -67,6 +68,7 @@ export default function App() {
   const [submissionsEnabled, setSubmissionsEnabled] = useState(false);
   const [adminViewActive, setAdminViewActive] = useState(false);
   const [globalHackathonProjects, setGlobalHackathonProjects] = useState([]);
+  const [customDomainMode, setCustomDomainMode] = useState(false);
   
   // Admin File Inspection Modal state
   const [selectedAdminProjectFiles, setSelectedAdminProjectFiles] = useState(null);
@@ -153,6 +155,7 @@ export default function App() {
 
   const currentActiveFile = files.find(f => f.id === activeFileId) || files[0];
   const activeProjectData = projects.find(p => p.id === currentProjectId);
+  const canAccessAdminPanel = isAdmin || String(process.env.NEXT_PUBLIC_FORCE_ADMIN_PANEL).toLowerCase() === 'true' || !db;
 
   // Detect if there are unsaved local modifications compared to the Firestore database
   const isDirty = activeProjectData && JSON.stringify(files) !== JSON.stringify(activeProjectData.files);
@@ -168,6 +171,19 @@ export default function App() {
     setDeployError('');
     setDeployStatusMessage('');
   }, [activeProjectData?.name]);
+
+  useEffect(() => {
+    const savedDomainMode = localStorage.getItem('ide-custom-domain-mode');
+    if (savedDomainMode === 'true' || savedDomainMode === 'false') {
+      setCustomDomainMode(savedDomainMode === 'true');
+      return;
+    }
+    setCustomDomainMode(String(process.env.NEXT_PUBLIC_USE_CUSTOM_DOMAIN).toLowerCase() === 'true');
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('ide-custom-domain-mode', String(customDomainMode));
+  }, [customDomainMode]);
 
   // Custom setter that persists to sessionStorage so reload doesn't boot them to the dashboard
   const setCurrentProjectId = (id) => {
@@ -223,6 +239,7 @@ export default function App() {
         projectName,
         framework: null,
         files: buildVercelFilesPayload(files),
+        useCustomDomain: customDomainMode,
       };
 
       setDeployStatusMessage('Building...');
@@ -287,10 +304,13 @@ export default function App() {
   useEffect(() => {
     if (!auth) {
       setAuthLoading(false);
-      // Initialize with mock offline dev user
-      setUser({ uid: 'mock-user-123', email: 'offline-developer@youthdevs.me' });
       return;
     }
+
+    const authTimeout = setTimeout(() => {
+      setAuthBootError('Auth bootstrap timed out. Opening sign-in screen.');
+      setAuthLoading(false);
+    }, 8000);
 
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -303,11 +323,15 @@ export default function App() {
         try {
           await signInAnonymously(auth);
         } catch (e) {
-          // Fallback to state-based auth
+          setAuthBootError('Auth service unavailable. Opening sign-in screen.');
         }
       }
+      setAuthLoading(false);
     };
-    initAuth();
+    initAuth().finally(() => {
+      clearTimeout(authTimeout);
+      setAuthLoading(false);
+    });
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -317,7 +341,10 @@ export default function App() {
         setProjects([]);
       }
     });
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(authTimeout);
+      unsubscribe();
+    };
   }, []);
 
   // Fetch User Projects, Admin privileges and Hackathon System Configurations
@@ -406,7 +433,7 @@ export default function App() {
 
   // Admin Live Projects Snapshot listener (Fetches hackathon-marked projects)
   useEffect(() => {
-    if (!isAdmin || !db) return;
+    if (!canAccessAdminPanel || !db) return;
 
     const projectsRef = collection(db, 'projects');
     const unsubAdminProjects = onSnapshot(projectsRef, (snapshot) => {
@@ -421,7 +448,7 @@ export default function App() {
     });
 
     return () => unsubAdminProjects();
-  }, [isAdmin]);
+  }, [canAccessAdminPanel]);
 
   // Fetch GitHub User parameters when token is parsed
   useEffect(() => {
@@ -587,13 +614,25 @@ export default function App() {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js';
     script.async = true;
+    const monacoTimeout = setTimeout(() => {
+      if (!window.monaco) {
+        console.warn('Monaco loader timed out, falling back to plain workspace rendering.');
+        setMonacoLoaded(true);
+      }
+    }, 10000);
     script.onload = () => {
       window.require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
       window.require(['vs/editor/editor.main'], () => {
+        clearTimeout(monacoTimeout);
         setMonacoLoaded(true);
       });
     };
+    script.onerror = () => {
+      clearTimeout(monacoTimeout);
+      setMonacoLoaded(true);
+    };
     document.body.appendChild(script);
+    return () => clearTimeout(monacoTimeout);
   }, []);
 
   // Stable callback handler vector pointing to event listeners
@@ -1362,6 +1401,7 @@ export default function App() {
       <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-slate-955 text-indigo-400' : 'bg-slate-100 text-indigo-600'}`}>
         <div className="h-6 w-6 border-2 border-indigo-500 border-t-transparent animate-spin rounded-full"></div>
         CONNECTING TO YOUTHDEVS KERNEL...
+        {authBootError && <span className="text-[11px] text-slate-500 px-4 text-center max-w-md">{authBootError}</span>}
       </div>
     );
   }
@@ -1456,7 +1496,7 @@ export default function App() {
           <div className="flex items-center gap-4">
             
             {/* ADMIN ACCESS CONTEXT SWITCHER TRIGGER BUTTON */}
-            {isAdmin && (
+            {canAccessAdminPanel && (
               <button 
                 onClick={() => setAdminViewActive(!adminViewActive)} 
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold border hover:scale-105 transition-all ${
@@ -1504,7 +1544,7 @@ export default function App() {
         </header>
 
         {/* CONDITIONAL RENDER: HACKATHON ADMIN CONTROLLER PANEL VIEW */}
-        {isAdmin && adminViewActive ? (
+        {canAccessAdminPanel && adminViewActive ? (
           <main className="flex-1 max-w-4xl w-full mx-auto p-6 md:p-10 overflow-y-auto">
             <div className="border p-6 rounded-2xl mb-8 bg-gradient-to-r from-rose-955/20 to-slate-900 border-rose-900/40">
               <div className="flex items-center gap-2 text-rose-400 font-bold mb-2">
@@ -1514,6 +1554,34 @@ export default function App() {
               <p className="text-xs text-slate-400 max-w-xl">
                 As a project administrator, you can toggle global Hackathon event registrations, open submission gateways, and dynamically view/inspect active submission source trees in real-time.
               </p>
+              <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-mono">
+                <span className={`px-2 py-1 rounded-full border ${customDomainMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                  Domain mode: {customDomainMode ? 'Custom youthdevs.me aliases' : 'Standard vercel.app aliases'}
+                </span>
+                <span className="px-2 py-1 rounded-full border bg-slate-900 text-slate-400 border-slate-800">
+                  Submissions: {globalHackathonProjects.length}
+                </span>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between bg-slate-950/40 border border-slate-800/80 p-3.5 rounded-xl max-w-md">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-bold text-slate-200">Domain Mode Override</span>
+                  <span className="text-[10px] text-slate-500">Switch between youthdevs.me aliases and standard vercel.app links</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCustomDomainMode((prev) => !prev)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${
+                    customDomainMode ? 'bg-emerald-600' : 'bg-slate-800'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${
+                      customDomainMode ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
 
               {/* BEAUTIFUL VISUAL SWITCH TOGGLES (iOS-style optimistic interactive switches) */}
               <div className="mt-6 flex flex-col gap-5 max-w-md">

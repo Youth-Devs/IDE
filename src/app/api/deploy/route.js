@@ -1,6 +1,23 @@
 import { NextResponse } from 'next/server';
 
-const VERCEL_DEPLOYMENTS_ENDPOINT = 'https://api.vercel.com/v13/deployments';
+const API_BASE = 'https://api.vercel.com';
+
+function isCustomDomainEnabled(overrideValue) {
+  if (overrideValue === true || overrideValue === false) {
+    return overrideValue;
+  }
+  return String(process.env.USE_CUSTOM_DOMAIN).toLowerCase() === 'true';
+}
+
+function slugifyProjectName(input) {
+  return String(input || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 63);
+}
 
 function normalizeFiles(files) {
   if (!Array.isArray(files)) return [];
@@ -15,86 +32,152 @@ function normalizeFiles(files) {
     .filter(Boolean);
 }
 
-function extractVercelErrorMessage(responseText) {
+function extractErrorMessage(payload) {
+  if (!payload) return 'Unknown Vercel error.';
+  if (typeof payload === 'string') return payload;
+  return (
+    payload?.error?.message ||
+    payload?.error ||
+    payload?.message ||
+    JSON.stringify(payload)
+  );
+}
+
+async function vercelRequest(token, path, init = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  });
+
+  const text = await response.text();
+  let json = null;
   try {
-    const parsed = JSON.parse(responseText);
-    return parsed?.error?.message || parsed?.error || parsed?.message || responseText;
+    json = text ? JSON.parse(text) : null;
   } catch {
-    return responseText;
+    json = text;
   }
+
+  if (!response.ok) {
+    const error = new Error(extractErrorMessage(json));
+    error.status = response.status;
+    error.payload = json;
+    throw error;
+  }
+
+  return json;
+}
+
+async function findExistingProject(token, projectName) {
+  const data = await vercelRequest(token, `/v9/projects`);
+  const projects = Array.isArray(data?.projects) ? data.projects : Array.isArray(data) ? data : [];
+  return projects.find((project) => project?.name === projectName) || null;
+}
+
+async function ensureProject(token, projectName, useCustomDomain, aliasDomain) {
+  const existingProject = await findExistingProject(token, projectName);
+  if (existingProject) {
+    return existingProject;
+  }
+
+  const createdProject = await vercelRequest(token, `/v9/projects`, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: projectName,
+      framework: null,
+      ...(useCustomDomain ? { alias: aliasDomain } : {}),
+    }),
+  });
+
+  return createdProject;
+}
+
+async function ensureProjectDomain(token, projectId, aliasDomain) {
+  if (!aliasDomain) return null;
+
+  try {
+    return await vercelRequest(token, `/v9/projects/${projectId}/domains`, {
+      method: 'POST',
+      body: JSON.stringify({ name: aliasDomain }),
+    });
+  } catch (error) {
+    if (error.status === 409) {
+      return { alreadyExists: true };
+    }
+    throw error;
+  }
+}
+
+async function createDeployment(token, { projectName, files, aliasDomain, useCustomDomain }) {
+  const payload = {
+    name: projectName,
+    files,
+    projectSettings: {
+      framework: null,
+    },
+  };
+
+  if (useCustomDomain && aliasDomain) {
+    payload.alias = aliasDomain;
+  }
+
+  return vercelRequest(token, `/v13/deployments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function POST(request) {
   try {
     const token = process.env.VERCEL_TOKEN;
     if (!token) {
-      return NextResponse.json(
-        { error: 'Server is missing VERCEL_TOKEN.' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Server is missing VERCEL_TOKEN.' }, { status: 500 });
     }
 
     const body = await request.json();
-    const projectName = typeof body?.projectName === 'string' ? body.projectName.trim() : '';
-    const framework = body?.framework ?? null;
+    const useCustomDomain = isCustomDomainEnabled(body?.useCustomDomain);
+    const requestedName = typeof body?.projectName === 'string' ? body.projectName.trim() : '';
+    const slug = slugifyProjectName(requestedName);
+    const projectName = slug || 'hackathon-project';
+    const aliasDomain = useCustomDomain ? `${projectName}.youthdevs.me` : `${projectName}.vercel.app`;
     const files = normalizeFiles(body?.files);
 
-    if (!projectName) {
-      return NextResponse.json(
-        { error: 'Project name is required.' },
-        { status: 400 }
-      );
-    }
-
     if (!files.length) {
-      return NextResponse.json(
-        { error: 'At least one file is required for deployment.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'At least one file is required for deployment.' }, { status: 400 });
     }
 
-    const payload = {
-      name: projectName,
-      files,
-      projectSettings: {
-        framework,
-      },
-    };
+    const project = await ensureProject(token, projectName, useCustomDomain, aliasDomain);
+    const projectId = project?.id || project?.projectId || null;
 
-    const response = await fetch(VERCEL_DEPLOYMENTS_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
+    if (!projectId) {
+      return NextResponse.json({ error: 'Vercel project lookup succeeded, but no projectId was returned.' }, { status: 500 });
+    }
+
+    if (useCustomDomain) {
+      await ensureProjectDomain(token, projectId, aliasDomain);
+    }
+
+    await createDeployment(token, {
+      projectName,
+      files,
+      aliasDomain,
+      useCustomDomain,
     });
 
-    const responseText = await response.text();
-    if (!response.ok) {
-      return NextResponse.json(
-        {
-          error: `Vercel deployment failed: ${extractVercelErrorMessage(responseText)}`,
-        },
-        { status: response.status }
-      );
-    }
-
-    const data = responseText ? JSON.parse(responseText) : {};
-    const url = data?.url || data?.deployment?.url || '';
-
     return NextResponse.json({
-      url,
-      deploymentId: data?.id || data?.deployment?.id || null,
-      readyState: data?.readyState || null,
+      url: `https://${aliasDomain}`,
+      projectId,
+      projectName,
+      domainMode: useCustomDomain ? 'custom' : 'vercel',
     });
   } catch (error) {
     console.error('Vercel deploy route error:', error);
     return NextResponse.json(
-      {
-        error: error?.message || 'Unexpected deployment error.',
-      },
-      { status: 500 }
+      { error: error?.message || 'Unexpected deployment error.' },
+      { status: error?.status || 500 }
     );
   }
 }
