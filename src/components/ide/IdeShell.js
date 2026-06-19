@@ -1874,7 +1874,22 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {projects.map(proj => (
-                  <div key={proj.id} onClick={() => { setCurrentProjectId(proj.id); setFiles([]); setActiveFileId(''); setInviteStatus(''); }} className={`p-4 border rounded-xl cursor-pointer transition-all group relative ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-emerald-500/40 text-slate-300' : 'bg-white border-emerald-200 hover:border-emerald-500/45 text-slate-700 shadow-sm hover:shadow'}`}>
+                  <div
+                    key={proj.id}
+                    onClick={() => {
+                      const nextSlug = slugifyProjectName(proj.slug || proj.name || proj.id || '');
+                      if (proj.id) {
+                        sessionStorage.setItem('current-project-id', proj.id);
+                      }
+                      setFiles([]);
+                      setActiveFileId('');
+                      setInviteStatus('');
+                      if (nextSlug) {
+                        router.push(`/${nextSlug}`);
+                      }
+                    }}
+                    className={`p-4 border rounded-xl cursor-pointer transition-all group relative ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-emerald-500/40 text-slate-300' : 'bg-white border-emerald-200 hover:border-emerald-500/45 text-slate-700 shadow-sm hover:shadow'}`}
+                  >
                     <div className={`flex items-center justify-between font-bold text-sm transition-colors ${theme === 'dark' ? 'group-hover:text-emerald-500' : 'group-hover:text-emerald-700'}`}>
                       <div className="flex items-center gap-2.5">
                         <Folder size={16} className="text-emerald-500" />
