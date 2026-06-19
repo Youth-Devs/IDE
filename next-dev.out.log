@@ -1,0 +1,14 @@
+
+> youthdevs-vibe-ide@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.3
+  - Local:        http://localhost:3002
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 10.3s
+ ○ Compiling / ...
+ ✓ Compiled / in 23.4s (686 modules)
+ GET / 200 in 26579ms
+ ✓ Compiled in 3.3s (287 modules)

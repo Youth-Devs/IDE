@@ -1,0 +1,15 @@
+
+> Build error occurred
+Error: ENOENT: no such file or directory, open 'C:\Users\kvvar\OneDrive\Github Clones\IDE\.next\export-marker.json'
+    at async open (node:internal/fs/promises:641:25)
+    at async Object.writeFile (node:internal/fs/promises:1215:14)
+    at async writeFileUtf8 (C:\Users\kvvar\OneDrive\Github Clones\IDE\node_modules\next\dist\build\index.js:155:5)
+    at async writeManifest (C:\Users\kvvar\OneDrive\Github Clones\IDE\node_modules\next\dist\build\index.js:161:5)
+    at async C:\Users\kvvar\OneDrive\Github Clones\IDE\node_modules\next\dist\build\index.js:2106:13
+    at async Span.traceAsyncFn (C:\Users\kvvar\OneDrive\Github Clones\IDE\node_modules\next\dist\trace\trace.js:154:20)
+    at async build (C:\Users\kvvar\OneDrive\Github Clones\IDE\node_modules\next\dist\build\index.js:366:9) {
+  errno: -4058,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'C:\\Users\\kvvar\\OneDrive\\Github Clones\\IDE\\.next\\export-marker.json'
+}

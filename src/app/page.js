@@ -2,6 +2,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, ArrowLeft, LogIn, Sun, Moon, Users, UserPlus, Save, Github, ShieldAlert, Award, FileSearch } from 'lucide-react';
+import AuthScreen from '../components/ide/AuthScreen';
+import WorkspaceHeader from '../components/ide/WorkspaceHeader';
+import {
+  buildVercelFilesPayload,
+  decodeBase64Utf8,
+  filesAreIdentical,
+} from '../lib/ide-utils';
 
 // Firebase Connectors
 import { initializeApp, getApps, getApp } from 'firebase/app';
@@ -35,21 +42,6 @@ try {
 } catch (error) {
   console.warn("Firebase initialization skipped or failed. Falling back to local offline mode.", error);
 }
-
-// Helper to decode Base64 safe for UTF-8 unicode content
-const decodeBase64Utf8 = (str) => {
-  try {
-    return decodeURIComponent(atob(str).split('').map(c => {
-      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-    }).join(''));
-  } catch (e) {
-    try {
-      return atob(str);
-    } catch (err) {
-      return '';
-    }
-  }
-};
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -94,6 +86,7 @@ export default function App() {
   const [deployStatusMessage, setDeployStatusMessage] = useState('');
   const [deployError, setDeployError] = useState('');
   const [deployUrl, setDeployUrl] = useState('');
+  const [deployDomainMode, setDeployDomainMode] = useState('');
 
   // Teammate Invitation Input State
   const [teammateEmailInput, setTeammateEmailInput] = useState('');
@@ -170,6 +163,7 @@ export default function App() {
     setDeployUrl('');
     setDeployError('');
     setDeployStatusMessage('');
+    setDeployDomainMode('');
   }, [activeProjectData?.name]);
 
   useEffect(() => {
@@ -193,27 +187,6 @@ export default function App() {
     } else {
       sessionStorage.removeItem('current-project-id');
     }
-  };
-
-  // Robust content comparison utility to prevent file explorer desyncs
-  const filesAreIdentical = (arr1, arr2) => {
-    if (!arr1 || !arr2) return false;
-    if (arr1.length !== arr2.length) return false;
-    return arr1.every(f1 => {
-      const f2 = arr2.find(f => f.name === f1.name);
-      return f2 && f2.content === f1.content;
-    });
-  };
-
-  const buildVercelFilesPayload = (workspaceFiles) => {
-    return workspaceFiles.map((file) => {
-      const rawPath = file.path || file.name || '';
-      const normalizedPath = String(rawPath).replace(/^\/+/, '');
-      return {
-        file: normalizedPath,
-        data: typeof file.content === 'string' ? file.content : '',
-      };
-    }).filter((file) => file.file);
   };
 
   const handleDeployToVercel = async () => {
@@ -257,6 +230,7 @@ export default function App() {
       }
 
       setDeployUrl(result.url || '');
+      setDeployDomainMode(result.domainMode || '');
       setDeployStatusMessage('Deployment complete.');
     } catch (error) {
       setDeployError(error.message || 'Unable to deploy right now.');
@@ -334,6 +308,8 @@ export default function App() {
     });
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setTheme('dark');
+      localStorage.setItem('ide-theme', 'dark');
       setUser(currentUser);
       setAuthLoading(false);
       if (!currentUser) {
@@ -1389,17 +1365,10 @@ export default function App() {
     }
   };
 
-  // SINGLE VALID DECLARATION OF formatTime
-  const formatTime = (secs) => {
-    const mins = Math.floor(secs / 60);
-    const remainingSecs = secs % 60;
-    return `${mins}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
-  };
-
   if (authLoading) {
     return (
-      <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-slate-955 text-indigo-400' : 'bg-slate-100 text-indigo-600'}`}>
-        <div className="h-6 w-6 border-2 border-indigo-500 border-t-transparent animate-spin rounded-full"></div>
+      <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#050b08] text-emerald-300'}`}>
+        <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent animate-spin rounded-full"></div>
         CONNECTING TO YOUTHDEVS KERNEL...
         {authBootError && <span className="text-[11px] text-slate-500 px-4 text-center max-w-md">{authBootError}</span>}
       </div>
@@ -1409,88 +1378,40 @@ export default function App() {
   // --- RENDER 1: SIGN IN / SIGN UP SCREEN PANEL ---
   if (!user) {
     return (
-      <div className={`h-screen w-screen flex items-center justify-center p-4 transition-colors duration-200 ${theme === 'dark' ? 'bg-slate-955' : 'bg-slate-50'}`}>
-        <div className={`w-full max-w-sm border p-6 rounded-2xl shadow-2xl transition-all ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="h-10 w-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-lg">Y</div>
-            
-            <button 
-              onClick={toggleTheme} 
-              className={`p-2 rounded-lg border transition-all ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-855' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
-              title="Toggle system theme"
-            >
-              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-          </div>
-          <h2 className={`text-xl font-bold tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{isSignUp ? 'Create Workspace Account' : 'Sign In to Vibe Workspace'}</h2>
-          <p className="text-xs text-slate-500 mt-1 mb-4">Enter credentials or connect using your provider channels.</p>
-          
-          <form onSubmit={handleAuthSubmit} className="flex flex-col gap-3">
-            <input 
-              type="email" 
-              placeholder="Email address" 
-              value={email} 
-              onChange={e => setEmail(e.target.value)} 
-              required 
-              className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark' ? 'bg-slate-955 border-slate-800 focus:border-indigo-500 text-slate-200' : 'bg-white border-slate-300 focus:border-indigo-500 text-slate-855'}`} 
-            />
-            <input 
-              type="password" 
-              placeholder="Account Security Key" 
-              value={password} 
-              onChange={e => setPassword(e.target.value)} 
-              required 
-              className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark' ? 'bg-slate-955 border-slate-800 focus:border-indigo-500 text-slate-200' : 'bg-white border-slate-300 focus:border-indigo-500 text-slate-855'}`} 
-            />
-            {authError && <p className="text-[11px] text-red-400 font-mono">{authError}</p>}
-            
-            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2.5 rounded-lg transition mt-1 shadow-md shadow-indigo-650/10">
-              {isSignUp ? 'Initialize Profile' : 'Access Workspace'}
-            </button>
-          </form>
-
-          <div className={`relative flex py-4 items-center font-mono text-[9px] uppercase tracking-widest ${theme === 'dark' ? 'text-slate-600' : 'text-slate-400'}`}>
-            <div className={`flex-grow border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}></div>
-            <span className="mx-2 shrink-0">OR</span>
-            <div className={`flex-grow border-t ${theme === 'dark' ? 'border-slate-800' : 'border-slate-200'}`}></div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <button onClick={handleGithubSignIn} className={`w-full border text-xs font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${theme === 'dark' ? 'bg-slate-900 border-slate-800 text-slate-100 hover:bg-slate-855' : 'bg-white border-slate-200 text-slate-755 hover:bg-slate-50'}`}>
-              <Github size={14} className="fill-slate-100" /> Continue with GitHub
-            </button>
-
-            <button onClick={handleGoogleSignIn} className={`w-full border text-xs font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${theme === 'dark' ? 'bg-slate-955 border-slate-800 text-slate-300 hover:bg-slate-905' : 'bg-white border-slate-200 text-slate-705 hover:bg-slate-50'}`}>
-              <LogIn size={14} /> Continue with Google
-            </button>
-          </div>
-
-          <p className="text-center text-xs text-slate-500 mt-4">
-            {isSignUp ? 'Already have an account?' : 'Need a cloud development profile?'} 
-            <button onClick={() => setIsSignUp(!isSignUp)} className="text-indigo-500 font-semibold ml-1 hover:underline">{isSignUp ? 'Log In' : 'Sign Up'}</button>
-          </p>
-        </div>
-      </div>
+      <AuthScreen
+        theme={theme}
+        isSignUp={isSignUp}
+        email={email}
+        password={password}
+        authError={authError}
+        onToggleTheme={toggleTheme}
+        onAuthSubmit={handleAuthSubmit}
+        onGithubSignIn={handleGithubSignIn}
+        onGoogleSignIn={handleGoogleSignIn}
+        onToggleAuthMode={() => setIsSignUp(!isSignUp)}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+      />
     );
   }
 
   // --- RENDER 2: DASHBOARD VIEW PANEL ---
   if (!currentProjectId) {
     return (
-      <div className={`h-screen w-screen flex flex-col font-sans transition-colors duration-200 relative ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
+      <div className={`h-screen w-screen flex flex-col font-sans transition-colors duration-200 relative ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#050b08] text-slate-200'}`}>
         
         {/* PROJECT CREATION LOADER OVERLAY STATUS PANEL */}
         {isCreatingProject && (
-          <div className="absolute inset-0 bg-slate-955/85 backdrop-blur-md flex flex-col items-center justify-center z-50 p-4 font-mono text-xs text-indigo-400 gap-3">
-            <div className="h-8 w-8 border-4 border-indigo-500 border-t-transparent animate-spin rounded-full" />
+          <div className="absolute inset-0 bg-[#050b08]/85 backdrop-blur-md flex flex-col items-center justify-center z-50 p-4 font-mono text-xs text-emerald-300 gap-3">
+            <div className="h-8 w-8 border-4 border-emerald-500 border-t-transparent animate-spin rounded-full" />
             <span className="uppercase tracking-widest font-bold">Configuring Collaboration Layer</span>
             <span className="text-slate-400 text-[11px] animate-pulse">⚙️ {projectStatusMessage}</span>
           </div>
         )}
 
-        <header className={`h-14 border-b px-6 flex items-center justify-between transition-colors ${theme === 'dark' ? 'border-slate-800 bg-slate-900/40' : 'border-slate-200 bg-white'}`}>
+        <header className={`h-14 border-b px-6 flex items-center justify-between transition-colors ${theme === 'dark' ? 'border-emerald-900/30 bg-[#07120c]/70' : 'border-emerald-900/30 bg-[#07120c]/70'}`}>
           <div className="flex items-center gap-3">
-            <div className="h-7 w-7 bg-indigo-600 rounded-md flex items-center justify-center font-black text-sm text-white">Y</div>
+            <div className="h-7 w-7 bg-emerald-600 rounded-md flex items-center justify-center font-black text-sm text-white shadow-md shadow-emerald-950/20">Y</div>
             <span className={`text-xs font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>YouthDevs Central Hub</span>
           </div>
           <div className="flex items-center gap-4">
@@ -1501,8 +1422,8 @@ export default function App() {
                 onClick={() => setAdminViewActive(!adminViewActive)} 
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold border hover:scale-105 transition-all ${
                   adminViewActive 
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-400' 
-                    : theme === 'dark' ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
+                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' 
+                    : theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30 text-slate-300' : 'bg-[#08140d] border-emerald-900/30 text-slate-300'
                 }`}
               >
                 <ShieldAlert size={12} />
@@ -1512,7 +1433,7 @@ export default function App() {
 
             {/* DYNAMIC GITHUB HUBLINK CONTROLLER INDICATOR */}
             {githubUser ? (
-              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${theme === 'dark' ? 'bg-emerald-955/20 border-emerald-900/40 text-emerald-400' : 'bg-emerald-50 border-emerald-100 text-emerald-600'}`}>
+              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${theme === 'dark' ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300' : 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300'}`}>
                 <Github size={11} />
                 <span>Git Connected: <b>{githubUser.login}</b></span>
               </div>
@@ -1523,14 +1444,14 @@ export default function App() {
               </button>
             )}
 
-            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border ${theme === 'dark' ? 'bg-indigo-955/30 border-indigo-900/40 text-indigo-400' : 'bg-indigo-50 border-indigo-100 text-indigo-600'}`}>
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border ${theme === 'dark' ? 'bg-emerald-950/25 border-emerald-900/40 text-emerald-300' : 'bg-emerald-950/25 border-emerald-900/40 text-emerald-300'}`}>
               <Users size={12} />
               <span>IDE Users: <b className="font-mono font-bold">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
             </div>
 
             <button 
               onClick={toggleTheme} 
-              className={`p-2 rounded-lg border transition-all shrink-0 ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-855' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}
+              className={`p-2 rounded-lg border transition-all shrink-0 ${theme === 'dark' ? 'border-emerald-900/30 text-emerald-300 hover:bg-[#0b1810]' : 'border-emerald-900/30 text-emerald-300 hover:bg-[#0b1810]'}`}
               title="Toggle system theme"
             >
               {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
@@ -1546,8 +1467,8 @@ export default function App() {
         {/* CONDITIONAL RENDER: HACKATHON ADMIN CONTROLLER PANEL VIEW */}
         {canAccessAdminPanel && adminViewActive ? (
           <main className="flex-1 max-w-4xl w-full mx-auto p-6 md:p-10 overflow-y-auto">
-            <div className="border p-6 rounded-2xl mb-8 bg-gradient-to-r from-rose-955/20 to-slate-900 border-rose-900/40">
-              <div className="flex items-center gap-2 text-rose-400 font-bold mb-2">
+              <div className="border p-6 rounded-2xl mb-8 bg-gradient-to-r from-emerald-950/35 via-slate-950 to-emerald-900/20 border-emerald-900/30">
+              <div className="flex items-center gap-2 text-emerald-300 font-bold mb-2">
                 <ShieldAlert size={20} />
                 <h2 className="text-lg">Hackathon Control Center</h2>
               </div>
@@ -1555,7 +1476,7 @@ export default function App() {
                 As a project administrator, you can toggle global Hackathon event registrations, open submission gateways, and dynamically view/inspect active submission source trees in real-time.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-mono">
-                <span className={`px-2 py-1 rounded-full border ${customDomainMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                <span className={`px-2 py-1 rounded-full border ${customDomainMode ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
                   Domain mode: {customDomainMode ? 'Custom youthdevs.me aliases' : 'Standard vercel.app aliases'}
                 </span>
                 <span className="px-2 py-1 rounded-full border bg-slate-900 text-slate-400 border-slate-800">
@@ -1587,7 +1508,7 @@ export default function App() {
               <div className="mt-6 flex flex-col gap-5 max-w-md">
                 
                 {/* Switch 1: Global Hackathon Event */}
-                <div className="flex items-center justify-between bg-slate-950/40 border border-slate-800/80 p-3.5 rounded-xl">
+                <div className="flex items-center justify-between bg-slate-950/40 border border-emerald-900/30 p-3.5 rounded-xl">
                   <div className="flex flex-col gap-0.5">
                     <span className="text-xs font-bold text-slate-200">Hackathon Event Status</span>
                     <span className="text-[10px] text-slate-500">Toggle student assignment registration badges globally</span>
@@ -1609,7 +1530,7 @@ export default function App() {
 
                 {/* Switch 2: Submission Gate (Rendered when event is active) */}
                 {hackathonActive && (
-                  <div className="flex items-center justify-between bg-slate-950/40 border border-slate-800/80 p-3.5 rounded-xl animate-fade-in">
+                  <div className="flex items-center justify-between bg-slate-950/40 border border-emerald-900/30 p-3.5 rounded-xl animate-fade-in">
                     <div className="flex flex-col gap-0.5">
                       <span className="text-xs font-bold text-slate-200">Submission Gateway Portal</span>
                       <span className="text-[10px] text-slate-500">Enable "Submit to Admin" buttons on student repos</span>
@@ -1818,111 +1739,32 @@ export default function App() {
 
   // --- RENDER 3: PRIMARY WORKSPACE IDE VIEW ---
   return (
-    <div className={`flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 ${theme === 'dark' ? 'bg-slate-955 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-      
-      {/* HEADER SECTION */}
-      <header className={`flex h-14 items-center justify-between px-4 border-b z-10 shrink-0 transition-colors ${theme === 'dark' ? 'border-slate-800 bg-slate-900/60 backdrop-blur-md' : 'border-slate-200 bg-white/95'}`}>
-        <div className="flex items-center gap-3 max-w-[50%] overflow-hidden">
-          <button onClick={() => setCurrentProjectId(null)} className={`p-1.5 rounded-lg transition-colors shrink-0 ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-855'}`} title="Return to Dashboard">
-            <ArrowLeft size={14} />
-          </button>
-          <div className={`h-5 w-px shrink-0 ${theme === 'dark' ? 'bg-slate-800' : 'bg-slate-200'}`} />
-          <span className="font-bold text-xs tracking-wider bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent uppercase font-mono truncate shrink-0 flex items-center gap-1.5">
-            {activeProjectData?.githubRepo && <Github size={13} className="shrink-0 text-slate-400" />}
-            {activeProjectData?.name}
-          </span>
-          
-          <div className={`hidden md:flex items-center gap-1 text-[10px] text-slate-400 px-2 py-0.5 rounded font-mono border truncate shrink-0 ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-200/50 border-slate-300'}`}>
-            <span>Team: {activeProjectData?.memberEmails?.map(m => m.split('@')[0]).join(', ')}</span>
-          </div>
-
-          {/* LATEST TEAM CHANGE HEADER PANEL INDICATOR IN THEIR SPECIFIC ASSIGNED COLORS */}
-          {activeProjectData?.lastChange && (() => {
-            const idx = activeProjectData.memberEmails?.findIndex(m => m.toLowerCase().split('@')[0] === activeProjectData.lastChange.by?.toLowerCase());
-            
-            let containerClass = theme === 'dark' ? 'bg-slate-955 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600';
-            let authorClass = 'font-bold';
-
-            if (idx === 0) {
-              containerClass = theme === 'dark' ? 'bg-emerald-955/25 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700';
-              authorClass = 'font-black text-emerald-500 dark:text-emerald-400';
-            } else if (idx === 1) {
-              containerClass = theme === 'dark' ? 'bg-orange-955/25 border-orange-500/30 text-orange-400' : 'bg-orange-50 border-orange-200 text-orange-700';
-              authorClass = 'font-black text-orange-500 dark:text-orange-400';
-            } else if (idx === 2) {
-              containerClass = theme === 'dark' ? 'bg-blue-950/25 border-blue-500/30 text-blue-400' : 'bg-blue-50 border-blue-200 text-blue-700';
-              authorClass = 'font-black text-blue-500 dark:text-blue-400';
-            }
-
-            return (
-              <div className={`hidden lg:flex items-center gap-1.5 text-[10px] font-mono border px-2.5 py-0.5 rounded truncate transition-all ${containerClass}`}>
-                <span className="font-semibold uppercase text-[8px] tracking-wider shrink-0">Latest Change:</span>
-                <span className={`shrink-0 ${authorClass}`}>{activeProjectData.lastChange.by}</span>
-                <span className="opacity-50 shrink-0">·</span>
-                <span className="italic truncate">"{activeProjectData.lastChange.message}"</span>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* TEAM ACCOMMODATION: Add Teammate Overlay Feature */}
-        <div className="flex items-center gap-2">
-          <form onSubmit={handleAddTeammateSubmit} className="hidden xl:flex items-center gap-1 border rounded-lg p-1 text-xs bg-slate-955/30 border-slate-800/80">
-            <input 
-              type="email" 
-              placeholder="Teammate's Email..." 
-              value={teammateEmailInput} 
-              onChange={e => setTeammateEmailInput(e.target.value)} 
-              className="bg-transparent px-2 py-0.5 text-[11px] outline-none border-none font-mono text-slate-300 w-36"
-            />
-            <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white p-1 rounded transition flex items-center justify-center" title="Invite Teammate">
-              <UserPlus size={12} />
-            </button>
-          </form>
-          {inviteStatus && (
-            <span className="hidden xl:inline text-[9px] font-mono text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded max-w-[200px] truncate" title={inviteStatus}>
-              {inviteStatus}
-            </span>
-          )}
-
-          <div className={`flex items-center gap-1 text-[10px] font-semibold border px-3 py-1 rounded-full shrink-0 ${theme === 'dark' ? 'bg-indigo-955/30 border-indigo-900/40 text-indigo-400' : 'bg-indigo-50 border-indigo-100 text-indigo-600'}`}>
-            <Users size={11} />
-            <span>IDE Users: <b className="font-mono">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
-          </div>
-
-          <button 
-            onClick={toggleTheme} 
-            className={`p-2 rounded-lg border transition-all shrink-0 ${theme === 'dark' ? 'border-slate-800 text-amber-400 hover:bg-slate-855' : 'border-slate-200 text-slate-500 hover:bg-slate-100'}`}
-            title="Toggle system theme"
-          >
-            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
-
-          {/* Supercharge Status */}
-          <div className={`flex items-center gap-3 border px-3 py-1 rounded-xl transition-colors shrink-0 ${theme === 'dark' ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-            <div className="flex flex-col text-right">
-              <span className="text-[10px] font-bold uppercase tracking-tight">Supercharge</span>
-              <span className="text-[9px] font-mono text-slate-500">
-                {cooldownEndTime ? `Lock: ${formatTime(secondsLeft)}` : `Left: ${10 - superchargeUses}/10`}
-              </span>
-            </div>
-            <button
-              onClick={() => !cooldownEndTime && setIsSupercharged(!isSupercharged)} disabled={!!cooldownEndTime}
-              className={`p-1.5 rounded-lg border transition-all ${
-                cooldownEndTime ? 'bg-slate-955 border-slate-800 text-slate-700 cursor-not-allowed' : isSupercharged ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-slate-955 border-slate-800 text-slate-500'
-              }`}
-            >
-              <Zap size={14} className={isSupercharged ? "fill-amber-400 text-amber-400 animate-pulse" : ""} />
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 bg-[#050b08] text-slate-200">
+      <WorkspaceHeader
+        theme={theme}
+        user={user}
+        activeProjectData={activeProjectData}
+        totalUsers={totalUsers}
+        inviteStatus={inviteStatus}
+        teammateEmailInput={teammateEmailInput}
+        onBackToDashboard={() => setCurrentProjectId(null)}
+        onToggleTheme={toggleTheme}
+        onSignOut={() => signOut(auth)}
+        onAddTeammateSubmit={handleAddTeammateSubmit}
+        onTeammateEmailChange={setTeammateEmailInput}
+        onToggleSupercharge={() => !cooldownEndTime && setIsSupercharged(!isSupercharged)}
+        cooldownEndTime={cooldownEndTime}
+        secondsLeft={secondsLeft}
+        superchargeUses={superchargeUses}
+        isSupercharged={isSupercharged}
+        isCooldownActive={!!cooldownEndTime}
+      />
 
       <main className="flex flex-1 w-full overflow-hidden relative min-h-0">
         
         {/* EXPLORER TREE VIEW PANEL WITH LIVE PRESENCE BADGES */}
-        <section style={{ width: `${leftWidth}px` }} className={`border-r flex flex-col h-full shrink-0 overflow-hidden transition-colors ${theme === 'dark' ? 'border-slate-800/80 bg-slate-900/20' : 'border-slate-200 bg-slate-50'}`}>
-          <div className={`p-3 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'border-slate-800/60 bg-slate-900/40 text-slate-400' : 'border-slate-200 bg-slate-200/45 text-slate-600'}`}>
+        <section style={{ width: `${leftWidth}px` }} className={`border-r flex flex-col h-full shrink-0 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c]/45' : 'border-emerald-900/25 bg-[#07120c]/45'}`}>
+          <div className={`p-3 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300' : 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300'}`}>
             <span className="text-xs font-bold tracking-wider uppercase">Filesystem</span>
             <button onClick={() => setShowNewFileInput(!showNewFileInput)} className={`p-1 rounded transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-500 hover:text-slate-855'}`}><Plus size={14} /></button>
           </div>
@@ -1930,7 +1772,7 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1 custom-scrollbar">
             {showNewFileInput && (
               <form onSubmit={handleCreateFile} className="mb-2">
-                <input type="text" autoFocus placeholder="filename.html..." value={newFileName} onChange={e => setNewFileName(e.target.value)} onBlur={() => setTimeout(() => setShowNewFileInput(false), 200)} className={`w-full border rounded px-2 py-1 text-xs outline-none font-mono ${theme === 'dark' ? 'bg-slate-955 border-indigo-500 text-slate-200' : 'bg-white border-indigo-500 text-slate-800'}`} />
+                <input type="text" autoFocus placeholder="filename.html..." value={newFileName} onChange={e => setNewFileName(e.target.value)} onBlur={() => setTimeout(() => setShowNewFileInput(false), 200)} className={`w-full border rounded px-2 py-1 text-xs outline-none font-mono ${theme === 'dark' ? 'bg-[#050b08] border-emerald-500 text-slate-200' : 'bg-[#050b08] border-emerald-500 text-slate-200'}`} />
               </form>
             )}
             {files.map(file => {
@@ -2008,16 +1850,16 @@ export default function App() {
         <div className={`w-1.5 h-full cursor-ew-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 shrink-0`} onMouseDown={() => { isResizingLeft.current = true; }} />
 
         {/* CODE EDITOR WINDOW */}
-        <section style={{ width: `${centerWidth}px` }} className={`flex flex-col h-full shrink-0 overflow-hidden border-r transition-colors ${theme === 'dark' ? 'bg-slate-955 border-slate-800/80' : 'bg-white border-slate-200'}`}>
-          <div className={`h-9 border-b flex items-center justify-between overflow-x-auto shrink-0 select-none transition-colors ${theme === 'dark' ? 'bg-slate-900/40 border-slate-800/60' : 'bg-slate-50 border-slate-200'}`}>
+        <section style={{ width: `${centerWidth}px` }} className={`flex flex-col h-full shrink-0 overflow-hidden border-r transition-colors ${theme === 'dark' ? 'bg-[#07120c] border-emerald-900/25' : 'bg-[#07120c] border-emerald-900/25'}`}>
+          <div className={`h-9 border-b flex items-center justify-between overflow-x-auto shrink-0 select-none transition-colors ${theme === 'dark' ? 'bg-[#08140d]/60 border-emerald-900/20' : 'bg-[#08140d]/60 border-emerald-900/20'}`}>
             <div className="flex items-center overflow-x-auto">
               {files.map(file => {
                 const isActive = file.id === activeFileId;
                 return (
                   <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`h-9 flex items-center gap-2 px-4 text-xs font-mono border-r cursor-pointer transition-all shrink-0 ${
                     isActive 
-                      ? theme === 'dark' ? 'bg-slate-955 border-t-2 border-t-indigo-500 text-slate-100 border-r-slate-800/60' : 'bg-white border-t-2 border-t-indigo-500 text-slate-800 border-r-slate-200'
-                      : theme === 'dark' ? 'bg-slate-900/20 text-slate-500 border-r-slate-800/60' : 'bg-slate-100/50 text-slate-500 border-r-slate-200'
+                      ? theme === 'dark' ? 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20' : 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20'
+                      : theme === 'dark' ? 'bg-[#07120c] text-slate-400 border-r-emerald-900/20' : 'bg-[#07120c] text-slate-400 border-r-emerald-900/20'
                   }`}>
                     <span>{file.name}</span>
                     <X size={10} className="hover:text-red-500 transition-colors" onClick={e => handleCloseFile(file.id, e)} />
@@ -2030,7 +1872,7 @@ export default function App() {
           {isDirty && (
             <button 
                 onClick={() => triggerPushCommitModal(files)}
-                className="flex items-center gap-1 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-md shadow-indigo-650/20 hover:scale-105 animate-pulse"
+                className="flex items-center gap-1 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md shadow-emerald-950/20 hover:scale-105 animate-pulse"
               >
                 <Save size={12} />
               <span>{activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Team Change'}</span>
@@ -2045,14 +1887,14 @@ export default function App() {
               placeholder="Vercel project name"
               className={`w-40 text-xs font-mono px-3 py-1.5 rounded-lg border outline-none transition-colors ${
                 theme === 'dark'
-                  ? 'bg-slate-955 border-slate-800 text-slate-200 placeholder-slate-500 focus:border-cyan-500'
-                  : 'bg-white border-slate-300 text-slate-800 placeholder-slate-400 focus:border-cyan-500'
+                  ? 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
+                  : 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
               }`}
             />
             <button
               onClick={handleDeployToVercel}
               disabled={isDeployingToVercel || !files.length}
-              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-cyan-650/20"
+              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-emerald-950/20"
             >
               <Zap size={12} />
               <span>{isDeployingToVercel ? deployStatusMessage : 'Deploy to Vercel'}</span>
@@ -2062,10 +1904,10 @@ export default function App() {
 
         {(deployStatusMessage || deployError || deployUrl) && (
           <div className={`px-4 py-2 border-b text-[11px] font-mono ${
-            theme === 'dark' ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-white'
+            theme === 'dark' ? 'border-emerald-900/20 bg-[#050b08]/80' : 'border-emerald-900/20 bg-[#050b08]/80'
           }`}>
             {deployStatusMessage && !deployError && (
-              <span className="text-cyan-400">{deployStatusMessage}</span>
+              <span className="text-emerald-400">{deployStatusMessage}</span>
             )}
             {deployError && (
               <span className="text-rose-400">Deploy error: {deployError}</span>
@@ -2075,15 +1917,15 @@ export default function App() {
                 href={deployUrl.startsWith('http') ? deployUrl : `https://${deployUrl}`}
                 target="_blank"
                 rel="noreferrer"
-                className="text-emerald-400 hover:underline break-all"
+                className="text-emerald-300 hover:underline break-all"
               >
-                Live deployment: {deployUrl}
+                Live deployment ({deployDomainMode || (customDomainMode ? 'custom' : 'vercel')}): {deployUrl}
               </a>
             )}
           </div>
         )}
 
-          <div className="flex-1 w-full overflow-hidden bg-[#1e1e1e] relative">
+          <div className="flex-1 w-full overflow-hidden bg-[#050b08] relative">
             {!monacoLoaded ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-xs font-mono text-indigo-400 gap-2">
                 <div className="h-5 w-5 border-2 border-indigo-500 border-t-transparent animate-spin rounded-full" />
@@ -2098,43 +1940,43 @@ export default function App() {
         <div className={`w-1.5 h-full cursor-ew-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 shrink-0`} onMouseDown={() => { isResizingCenter.current = true; }} />
 
         {/* LIVE SANDBOX PREVIEW */}
-        <section className={`flex-1 flex flex-col h-full overflow-hidden min-w-[200px] transition-colors ${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-50'}`}>
-          <div className={`h-9 px-4 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'bg-slate-900/40 border-slate-800/60 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+        <section className="flex-1 flex flex-col h-full overflow-hidden min-w-[200px] bg-[#07120c] transition-colors">
+          <div className="h-9 px-4 border-b flex items-center justify-between shrink-0 transition-colors bg-[#08140d]/60 border-emerald-900/20 text-slate-300">
             <span className="text-xs font-semibold">Sandbox Preview Engine</span>
           </div>
-          <div className="flex-1 w-full bg-white relative">
+          <div className="flex-1 w-full bg-[#050b08] relative">
             <iframe title="Live View" srcDoc={getBundledPreviewCode()} sandbox="allow-scripts" className="absolute inset-0 w-full h-full border-none" />
           </div>
         </section>
       </main>
 
       {/* DRAG HANDLER 3 */}
-      <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-slate-800/50' : 'border-slate-200/50'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
+      <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-emerald-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-emerald-900/25' : 'border-emerald-900/25'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
 
       {/* FOOTER INTERACT CONSOLE */}
-      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 flex gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-slate-800 bg-slate-900/40 backdrop-blur-md' : 'border-slate-200 bg-white'}`}>
+      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 flex gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-900/20 bg-[#07120c]/70'}`}>
         <div className="flex-1 flex flex-col min-w-0 h-full">
           <div className={`flex items-center gap-1.5 mb-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
-            <Sparkles size={13} className={isAiLoading ? "animate-spin text-indigo-400" : ""} />
+            <Sparkles size={13} className={isAiLoading ? "animate-spin text-emerald-300" : ""} />
             <span className="text-[11px] font-bold uppercase tracking-wider">Prompt Terminal</span>
           </div>
-          <form onSubmit={handleAgenticVibeSubmit} className={`flex-1 flex items-stretch gap-2 border rounded-xl p-2 transition-all ${theme === 'dark' ? 'bg-slate-955 border-slate-800 focus-within:border-indigo-500/60' : 'bg-slate-50 border-slate-200 focus-within:border-indigo-500/70'}`}>
-            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Supercharge mode re-calibrating..." : "Instruct the file agent ecosystem to execute actions..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-855 placeholder-slate-400'}`} />
-            <button type="submit" disabled={isAiLoading || !promptInput.trim()} className="self-end flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition shrink-0 shadow-lg shadow-indigo-650/10">Vibe <ChevronRight size={12} /></button>
+          <form onSubmit={handleAgenticVibeSubmit} className={`flex-1 flex items-stretch gap-2 border rounded-xl p-2 transition-all ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60' : 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60'}`}>
+            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Supercharge mode re-calibrating..." : "Instruct the file agent ecosystem to execute actions..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-200 placeholder-slate-500'}`} />
+            <button type="submit" disabled={isAiLoading || !promptInput.trim()} className="self-end flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition shrink-0 shadow-lg shadow-emerald-950/20">Vibe <ChevronRight size={12} /></button>
           </form>
         </div>
 
-        <div className={`w-1/2 flex flex-col min-w-[250px] border-l pl-4 h-full ${theme === 'dark' ? 'border-slate-800/80' : 'border-slate-200'}`}>
-          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+        <div className={`w-1/2 flex flex-col min-w-[250px] border-l pl-4 h-full ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
+          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-300'}`}>
             <div className="flex items-center gap-1.5"><Terminal size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Console Pipeline</span></div>
             {lastModelUsed && <span className="text-[9px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/50 px-1.5 py-0.5 rounded-md">{lastModelUsed}</span>}
           </div>
-          <div className={`flex-1 border rounded-xl p-3 font-mono text-[11px] overflow-y-auto custom-scrollbar flex flex-col gap-1 shadow-inner ${theme === 'dark' ? 'bg-slate-955 border-slate-800/60 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+          <div className={`flex-1 border rounded-xl p-3 font-mono text-[11px] overflow-y-auto custom-scrollbar flex flex-col gap-1 shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300' : 'bg-[#050b08] border-emerald-900/30 text-slate-300'}`}>
             {consoleLogs.map((log, idx) => {
               let clr = theme === 'dark' ? "text-slate-400" : "text-slate-600";
-              if (log.startsWith('SUCCESS:')) clr = "text-emerald-500 font-medium";
-              if (log.startsWith('CRITICAL:')) clr = "text-rose-500 font-bold";
-              if (log.startsWith('PROMPT:')) clr = "text-indigo-500 italic";
+              if (log.startsWith('SUCCESS:')) clr = "text-emerald-300 font-medium";
+              if (log.startsWith('CRITICAL:')) clr = "text-emerald-200 font-bold";
+              if (log.startsWith('PROMPT:')) clr = "text-lime-300 italic";
               return <div key={idx} className={`${clr} break-all whitespace-pre-wrap`}>&gt; {log}</div>;
             })}
             <div ref={consoleBottomRef} />
@@ -2144,10 +1986,8 @@ export default function App() {
 
       {/* CUSTOM COMMIT CHANGE POP-UP MODAL UI (NO WINDOW ALERTS USED) */}
       {showChangeModal && (
-        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className={`w-full max-w-md border p-6 rounded-2xl shadow-2xl transition-all ${
-            theme === 'dark' ? 'bg-slate-900 border-slate-850' : 'bg-white border-slate-200'
-          }`}>
+        <div className="fixed inset-0 bg-[#050b08]/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="w-full max-w-md border p-6 rounded-2xl shadow-2xl transition-all bg-[#08140d] border-emerald-900/30">
             <div className="flex items-center gap-2 mb-3">
               <div className="h-8 w-8 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-500">
                 <Save size={16} />
@@ -2171,8 +2011,8 @@ export default function App() {
                 autoFocus
                 className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${
                   theme === 'dark' 
-                    ? 'bg-slate-955 border-slate-800 focus:border-indigo-500 text-slate-200' 
-                    : 'bg-slate-50 border-slate-300 focus:border-indigo-500 text-slate-855'
+                    ? 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200' 
+                    : 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
                 }`} 
               />
 
@@ -2183,18 +2023,14 @@ export default function App() {
                     setShowChangeModal(false);
                     setPendingFilesToSync(null);
                   }}
-                  className={`px-4 py-2.5 rounded-lg border transition ${
-                    theme === 'dark' 
-                      ? 'border-slate-850 hover:bg-slate-855 text-slate-400' 
-                      : 'border-slate-200 hover:bg-slate-100 text-slate-600'
-                  }`}
+                  className="px-4 py-2.5 rounded-lg border transition border-emerald-900/30 hover:bg-[#0b1810] text-slate-300"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit"
                   disabled={!changeNameInput.trim()}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg transition shadow-md shadow-indigo-650/10"
+                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg transition shadow-md shadow-emerald-950/20"
                 >
                   Confirm & Push
                 </button>
@@ -2206,9 +2042,9 @@ export default function App() {
 
       {/* ADMIN DETAILED SUBMISSION FILE INSPECTOR MODAL UI */}
       {selectedAdminProjectFiles && (
-        <div className="fixed inset-0 bg-slate-955/90 backdrop-blur-md flex items-center justify-center p-6 z-50 animate-fade-in">
-          <div className="w-full h-[90vh] max-w-5xl border rounded-2xl flex flex-col overflow-hidden bg-slate-900 border-slate-800 shadow-2xl">
-            <header className="h-12 border-b border-slate-800 px-4 flex items-center justify-between bg-slate-950 shrink-0">
+        <div className="fixed inset-0 bg-[#050b08]/90 backdrop-blur-md flex items-center justify-center p-6 z-50 animate-fade-in">
+          <div className="w-full h-[90vh] max-w-5xl border rounded-2xl flex flex-col overflow-hidden bg-[#08140d] border-emerald-900/30 shadow-2xl">
+            <header className="h-12 border-b border-emerald-900/30 px-4 flex items-center justify-between bg-[#050b08] shrink-0">
               <div className="flex items-center gap-2">
                 <Award className="text-rose-400" size={16} />
                 <span className="text-xs font-bold text-slate-200">Admin Live Grading Sandbox</span>
@@ -2223,7 +2059,7 @@ export default function App() {
 
             <div className="flex-1 flex min-h-0">
               {/* Submission Files list */}
-              <div className="w-64 border-r border-slate-800 bg-slate-950 p-3 overflow-y-auto shrink-0 flex flex-col gap-1">
+              <div className="w-64 border-r border-emerald-900/30 bg-[#050b08] p-3 overflow-y-auto shrink-0 flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Team Files</span>
                 {selectedAdminProjectFiles.map(file => (
                   <div 
@@ -2245,8 +2081,8 @@ export default function App() {
               </div>
 
               {/* View inspector panel */}
-              <div className="flex-1 flex flex-col bg-slate-950 min-w-0">
-                <div className="h-9 px-4 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between shrink-0">
+              <div className="flex-1 flex flex-col bg-[#050b08] min-w-0">
+                <div className="h-9 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0">
                   <span className="text-[11px] font-mono text-slate-400">{adminActiveFileName || "Select a file to inspect"}</span>
                 </div>
                 
