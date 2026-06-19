@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch } from 'lucide-react';
+import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch, ArrowLeft } from 'lucide-react';
 import AuthScreen from './AuthScreen';
 import WorkspaceHeader from './WorkspaceHeader';
 import {
@@ -156,14 +156,19 @@ export default function App() {
     routePath === 'login' ? 'login' :
     routePath === 'dashboard' ? 'dashboard' :
     routePath === 'admin' ? 'admin' :
+    routeSegments[0] === 'admin' && routeSegments[1] ? 'admin-project' :
     'project';
-  const isAdminRoute = routeMode === 'admin';
-  const projectSlugFromRoute = routeMode === 'project' ? (routeSegments[0] || '') : '';
+  const isAdminRoute = routeMode === 'admin' || routeMode === 'admin-project';
+  const projectSlugFromRoute =
+    routeMode === 'project' ? (routeSegments[0] || '') :
+    routeMode === 'admin-project' ? (routeSegments[1] || '') :
+    '';
 
   const currentActiveFile = files.find(f => f.id === activeFileId) || files[0];
   const activeProjectData = projects.find(p => p.id === currentProjectId);
-  const routeProject = routeMode === 'project'
-    ? projects.find((p) => slugifyProjectName(p.slug || p.name || p.id) === projectSlugFromRoute)
+  const routeProjectsSource = routeMode === 'admin-project' ? globalHackathonProjects : projects;
+  const routeProject = (routeMode === 'project' || routeMode === 'admin-project')
+    ? routeProjectsSource.find((p) => slugifyProjectName(p.slug || p.name || p.id) === projectSlugFromRoute)
     : null;
   const canAccessAdminPanel = isAdmin || String(process.env.NEXT_PUBLIC_FORCE_ADMIN_PANEL).toLowerCase() === 'true' || !db;
 
@@ -253,6 +258,17 @@ export default function App() {
       }
       if (!user && !authLoading) {
         router.replace('/login');
+      }
+      return;
+    }
+
+    if (routeMode === 'admin-project') {
+      if (!user && !authLoading) {
+        router.replace('/login');
+        return;
+      }
+      if (routeProject && routeProject.id !== currentProjectId) {
+        setCurrentProjectIdState(routeProject.id);
       }
       return;
     }
@@ -1608,6 +1624,89 @@ export default function App() {
     );
   }
 
+  if (routeMode === 'admin-project') {
+    const adminSubmissionProjectData = routeProject || activeProjectData;
+    const adminSubmissionFiles = Array.isArray(adminSubmissionProjectData?.submittedFiles) && adminSubmissionProjectData.submittedFiles.length > 0
+      ? adminSubmissionProjectData.submittedFiles
+      : Array.isArray(adminSubmissionProjectData?.files) ? adminSubmissionProjectData.files : [];
+    const adminSubmittedAt = adminSubmissionProjectData?.submittedAt
+      ? new Date(adminSubmissionProjectData.submittedAt).toLocaleString()
+      : '';
+
+    if (!adminSubmissionProjectData) {
+      return (
+        <div className="h-screen w-screen flex items-center justify-center bg-[#050b08] text-emerald-300 font-mono text-xs">
+          Resolving submission workspace...
+        </div>
+      );
+    }
+
+    return (
+      <div className={`flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
+        <header className="flex h-14 items-center justify-between px-4 border-b z-10 shrink-0 transition-colors border-emerald-900/25 bg-[#07120c]/70 backdrop-blur-md">
+          <div className="flex items-center gap-3 max-w-[70%] overflow-hidden">
+            <button onClick={() => router.push('/admin')} className={`p-1.5 rounded-lg transition-colors shrink-0 ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-emerald-50 text-emerald-700 hover:text-emerald-900'}`} title="Return to Admin Dashboard">
+              <ArrowLeft size={14} />
+            </button>
+            <div className={`h-5 w-px shrink-0 ${theme === 'dark' ? 'bg-slate-800' : 'bg-emerald-200'}`} />
+            <div className="min-w-0">
+              <div className="font-bold text-xs tracking-wider bg-gradient-to-r from-emerald-300 to-lime-200 bg-clip-text text-transparent uppercase font-mono truncate">
+                {adminSubmissionProjectData.name || 'Submitted Project'}
+              </div>
+              <div className={`text-[10px] font-mono truncate ${theme === 'dark' ? 'text-slate-500' : 'text-emerald-700'}`}>
+                {adminSubmissionProjectData.submitted ? 'Submitted' : 'In Review'}
+                {adminSubmittedAt ? ` • ${adminSubmittedAt}` : ''}
+                {adminSubmissionProjectData.submittedBy ? ` • by ${adminSubmissionProjectData.submittedBy}` : ''}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 min-h-0 flex">
+          <section className="w-72 shrink-0 border-r border-emerald-900/25 bg-[#07120c]/45 flex flex-col min-h-0">
+            <div className="px-4 py-3 border-b border-emerald-900/20">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Submission Files</div>
+              <div className="text-[11px] font-mono text-slate-400 mt-1">{adminSubmissionFiles.length} files</div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
+              {adminSubmissionFiles.map((file) => (
+                <button
+                  key={file.id || file.name}
+                  type="button"
+                  onClick={() => {
+                    setAdminActiveFileName(file.name || '');
+                    setAdminActiveFileContent(typeof file.content === 'string' ? file.content : '');
+                  }}
+                  className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${
+                    adminActiveFileName === file.name
+                      ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
+                      : 'text-slate-400 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <FileCode size={13} />
+                  <span className="truncate">{file.name || 'Untitled file'}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="flex-1 min-w-0 flex flex-col bg-[#050b08]">
+            <div className="h-12 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0">
+              <span className="text-[11px] font-mono text-slate-400">{adminActiveFileName || 'Select a file to inspect'}</span>
+              <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Read Only</span>
+            </div>
+
+            <div className="flex-1 p-4 overflow-auto custom-scrollbar">
+              <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text selection:bg-rose-500/30 selection:text-white">
+                {adminActiveFileContent || 'No content found inside this file segment.'}
+              </pre>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   // --- RENDER 2: DASHBOARD VIEW PANEL ---
   if (!currentProjectId) {
     return (
@@ -1898,7 +1997,7 @@ export default function App() {
                       setActiveFileId('');
                       setInviteStatus('');
                       if (nextSlug) {
-                        router.push(`/${nextSlug}`);
+                        router.push(`/admin/${nextSlug}`);
                       }
                     }}
                     className={`p-4 border rounded-xl cursor-pointer transition-all group relative ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-emerald-500/40 text-slate-300' : 'bg-white border-emerald-200 hover:border-emerald-500/45 text-slate-700 shadow-sm hover:shadow'}`}
