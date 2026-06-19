@@ -1,0 +1,2318 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch } from 'lucide-react';
+import AuthScreen from './AuthScreen';
+import WorkspaceHeader from './WorkspaceHeader';
+import {
+  buildVercelFilesPayload,
+  decodeBase64Utf8,
+  filesAreIdentical,
+  slugifyProjectName,
+} from '../../lib/ide-utils';
+
+// Firebase Connectors
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, GithubAuthProvider, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
+import { getFirestore, collection, doc, addDoc, getDocs, query, where, updateDoc, setDoc, onSnapshot, serverTimestamp, getCountFromServer, arrayUnion } from 'firebase/firestore';
+
+// Safe environment variable initialization with mock fallbacks to prevent runtime compilation crashes
+const firebaseConfig = {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.NEXT_PUBLIC_MEASUREMENT_ID
+};
+
+let app = null;
+let auth = null;
+let db = null;
+let googleProvider = null;
+
+// Gracefully instantiate Firebase services so missing environment variables do not block the page load
+try {
+  if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "placeholder-api-key-for-local-vibe") {
+    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    auth = getAuth(app);
+    db = getFirestore(app);
+    googleProvider = new GoogleAuthProvider();
+  }
+} catch (error) {
+  console.warn("Firebase initialization skipped or failed. Falling back to local offline mode.", error);
+}
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authBootError, setAuthBootError] = useState('');
+  
+  // Auth Form State
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  // Admin and Hackathon Configuration States
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [hackathonActive, setHackathonActive] = useState(false);
+  const [submissionsEnabled, setSubmissionsEnabled] = useState(false);
+  const [globalHackathonProjects, setGlobalHackathonProjects] = useState([]);
+  const [customDomainMode, setCustomDomainMode] = useState(false);
+  
+  // Admin File Inspection Modal state
+  const [selectedAdminProjectFiles, setSelectedAdminProjectFiles] = useState(null);
+  const [adminActiveFileContent, setAdminActiveFileContent] = useState('');
+  const [adminActiveFileName, setAdminActiveFileName] = useState('');
+
+  // GitHub Integration States
+  const [githubToken, setGithubToken] = useState(null);
+  const [githubUser, setGithubUser] = useState(null);
+  const [useGithubForNewProject, setUseGithubForNewProject] = useState(false);
+
+  // Dashboard vs IDE View state
+  const [currentProjectId, setCurrentProjectIdState] = useState(null); 
+  const [projects, setProjects] = useState([]);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [dashboardError, setDashboardError] = useState(''); 
+  
+  // PROJECT CREATION LOADING STATUS
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [projectStatusMessage, setProjectStatusMessage] = useState('');
+  const [deployProjectName, setDeployProjectName] = useState('');
+  const [isDeployingToVercel, setIsDeployingToVercel] = useState(false);
+  const [deployStatusMessage, setDeployStatusMessage] = useState('');
+  const [deployError, setDeployError] = useState('');
+  const [deployUrl, setDeployUrl] = useState('');
+  const [deployDomainMode, setDeployDomainMode] = useState('');
+
+  // Teammate Invitation Input State
+  const [teammateEmailInput, setTeammateEmailInput] = useState('');
+  const [inviteStatus, setInviteStatus] = useState('');
+
+  // Core IDE Project States
+  const [files, setFiles] = useState([]);
+  const [activeFileId, setActiveFileId] = useState('');
+  const [newFileName, setNewFileName] = useState('');
+  const [showNewFileInput, setShowNewFileInput] = useState(false);
+  const [selectedContextIds, setSelectedContextIds] = useState([]);
+
+  // Supercharge Rate Limiter State
+  const [isSupercharged, setIsSupercharged] = useState(false);
+  const [superchargeUses, setSuperchargeUses] = useState(0);
+  const [cooldownEndTime, setCooldownEndTime] = useState(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [lastModelUsed, setLastModelUsed] = useState(null);
+
+  // Theme State
+  const [theme, setTheme] = useState('dark');
+
+  // Registered Users Global Statistics
+  const [totalUsers, setTotalUsers] = useState(0);
+
+  // TEAM CHANGE POP-UP MODAL STATE
+  const [showChangeModal, setShowChangeModal] = useState(false);
+  const [changeNameInput, setChangeNameInput] = useState('');
+  const [pendingFilesToSync, setPendingFilesToSync] = useState(null);
+
+  // Monaco Editor Dynamic Load Hook States
+  const [monacoLoaded, setMonacoLoaded] = useState(false);
+  const editorContainerRef = useRef(null);
+  const editorInstanceRef = useRef(null);
+
+  // KEEP TRACK OF CLEAN SYNCHRONIZED VERSION OF DB FILES TO PREVENT LOCAL OVERWRITING WHILE TYPING
+  const lastSyncedFilesRef = useRef([]);
+  const lastChangeTimestampRef = useRef(0);
+
+  // Synchronized Reference Pointers to neutralize state closures in active threads
+  const activeFileIdRef = useRef(activeFileId);
+  const isInternalChangeRef = useRef(false);
+
+  // Layout & Console Utilities
+  const [promptInput, setPromptInput] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [consoleLogs, setConsoleLogs] = useState([
+    'SYSTEM: YouthDevs Workspace Real-Time Team Layer Online.'
+  ]);
+  const [previewHtml, setPreviewHtml] = useState('');
+
+  const [leftWidth, setLeftWidth] = useState(240); 
+  const [centerWidth, setCenterWidth] = useState(600); 
+  const [footerHeight, setFooterHeight] = useState(180); 
+
+  const isResizingLeft = useRef(false);
+  const isResizingCenter = useRef(false);
+  const isResizingFooter = useRef(false);
+  const consoleBottomRef = useRef(null);
+  const pathname = usePathname();
+  const router = useRouter();
+  const routePath = decodeURIComponent((pathname || '/').replace(/^\/+/, ''));
+  const routeSegments = routePath.split('/').filter(Boolean);
+  const routeMode =
+    routePath === '' ? 'root' :
+    routePath === 'login' ? 'login' :
+    routePath === 'dashboard' ? 'dashboard' :
+    routePath === 'admin' ? 'admin' :
+    'project';
+  const isAdminRoute = routeMode === 'admin';
+  const projectSlugFromRoute = routeMode === 'project' ? (routeSegments[0] || '') : '';
+
+  const currentActiveFile = files.find(f => f.id === activeFileId) || files[0];
+  const activeProjectData = projects.find(p => p.id === currentProjectId);
+  const routeProject = routeMode === 'project'
+    ? projects.find((p) => slugifyProjectName(p.slug || p.name || p.id) === projectSlugFromRoute)
+    : null;
+  const canAccessAdminPanel = isAdmin || String(process.env.NEXT_PUBLIC_FORCE_ADMIN_PANEL).toLowerCase() === 'true' || !db;
+
+  // Detect if there are unsaved local modifications compared to the Firestore database
+  const isDirty = activeProjectData && JSON.stringify(files) !== JSON.stringify(activeProjectData.files);
+
+  // Update active file tracker reference whenever active file shifts
+  useEffect(() => {
+    activeFileIdRef.current = activeFileId;
+  }, [activeFileId]);
+
+  useEffect(() => {
+    setDeployProjectName(activeProjectData?.name || '');
+    setDeployUrl('');
+    setDeployError('');
+    setDeployStatusMessage('');
+    setDeployDomainMode('');
+  }, [activeProjectData?.name]);
+
+  useEffect(() => {
+    const savedDomainMode = localStorage.getItem('ide-custom-domain-mode');
+    if (savedDomainMode === 'true' || savedDomainMode === 'false') {
+      setCustomDomainMode(savedDomainMode === 'true');
+      return;
+    }
+    setCustomDomainMode(String(process.env.NEXT_PUBLIC_USE_CUSTOM_DOMAIN).toLowerCase() === 'true');
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('ide-custom-domain-mode', String(customDomainMode));
+  }, [customDomainMode]);
+
+  useEffect(() => {
+    setPreviewHtml('');
+  }, [currentProjectId]);
+
+  // Custom setter that persists to sessionStorage so reload doesn't boot them to the dashboard
+  const setCurrentProjectId = (id) => {
+    setCurrentProjectIdState(id);
+    if (id) {
+      const targetProject = projects.find((project) => project.id === id);
+      const nextSlug = slugifyProjectName(targetProject?.slug || targetProject?.name || targetProject?.id || id);
+      sessionStorage.setItem('current-project-id', id);
+      if (nextSlug) {
+        router.push(`/${nextSlug}`);
+      }
+    } else {
+      sessionStorage.removeItem('current-project-id');
+      router.push('/dashboard');
+    }
+  };
+
+  useEffect(() => {
+    if (routeMode === 'root') {
+      if (!authLoading) {
+        router.replace(user ? '/dashboard' : '/login');
+      }
+      return;
+    }
+
+    if (routeMode === 'login') {
+      if (currentProjectId) {
+        setCurrentProjectIdState(null);
+        sessionStorage.removeItem('current-project-id');
+      }
+      if (user && !authLoading) {
+        router.replace('/dashboard');
+      }
+      return;
+    }
+
+    if (routeMode === 'dashboard') {
+      if (currentProjectId) {
+        setCurrentProjectIdState(null);
+        sessionStorage.removeItem('current-project-id');
+      }
+      if (!user && !authLoading) {
+        router.replace('/login');
+      }
+      return;
+    }
+
+    if (routeMode === 'admin') {
+      if (currentProjectId) {
+        setCurrentProjectIdState(null);
+        sessionStorage.removeItem('current-project-id');
+      }
+      if (!user && !authLoading) {
+        router.replace('/login');
+      }
+      return;
+    }
+
+    if (routeMode === 'project') {
+      if (!user && !authLoading) {
+        router.replace('/login');
+        return;
+      }
+      if (routeProject && routeProject.id !== currentProjectId) {
+        setCurrentProjectIdState(routeProject.id);
+      } else if (!routeProject && projects.length > 0 && !currentProjectId) {
+        router.replace('/dashboard');
+      }
+    }
+  }, [routeMode, routeProject?.id, user, authLoading, currentProjectId, router]);
+
+  const handleDeployToVercel = async () => {
+    if (isDeployingToVercel) return;
+
+    const projectName = (deployProjectName || activeProjectData?.name || 'hackathon-ide-project').trim();
+    if (!projectName) {
+      setDeployError('Please enter a project name before deploying.');
+      return;
+    }
+    if (!files.length) {
+      setDeployError('Add at least one file before deploying.');
+      return;
+    }
+
+    setIsDeployingToVercel(true);
+    setDeployError('');
+    setDeployUrl('');
+    setDeployStatusMessage('Deploying...');
+
+    try {
+      const payload = {
+        projectName,
+        framework: null,
+        files: buildVercelFilesPayload(files),
+        useCustomDomain: customDomainMode,
+      };
+
+      setDeployStatusMessage('Building...');
+      const response = await fetch('/api/deploy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result?.error || 'Deployment failed.');
+      }
+
+      setDeployUrl(result.url || '');
+      setDeployDomainMode(result.domainMode || '');
+      setDeployStatusMessage('Deployment complete.');
+    } catch (error) {
+      setDeployError(error.message || 'Unable to deploy right now.');
+      setDeployStatusMessage('');
+    } finally {
+      setIsDeployingToVercel(false);
+    }
+  };
+
+  const handleExportProjectToText = async (project) => {
+    const projectName = project?.name || 'project';
+    const slug = slugifyProjectName(project?.slug || projectName || project?.id || 'project');
+    const filesToExport = Array.isArray(project?.files) ? project.files : [];
+    const generatedAt = new Date().toISOString();
+
+    const sections = filesToExport.map((file, index) => {
+      const relativePath = String(file?.path || file?.name || '').replace(/^\/+/, '') || 'unknown';
+      const fileName = file?.name || relativePath.split('/').pop() || `file-${index + 1}`;
+      const content = typeof file?.content === 'string' ? file.content : '';
+
+      return [
+        `FILE ${index + 1}`,
+        `Name: ${fileName}`,
+        `Path: ${relativePath}`,
+        '--- CONTENT START ---',
+        content || '[empty file]',
+        '--- CONTENT END ---',
+      ].join('\n');
+    });
+
+    const output = [
+      `Project: ${projectName}`,
+      `Project Slug: ${slug}`,
+      `Generated: ${generatedAt}`,
+      `File Count: ${filesToExport.length}`,
+      '',
+      sections.length ? sections.join('\n\n' + '='.repeat(72) + '\n\n') : 'No files found in this project.',
+      '',
+    ].join('\n');
+
+    const blob = new Blob([output], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${slug || 'project'}-skipcourse.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Theme Initialization Layer
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('ide-theme');
+    if (savedTheme) {
+      setTheme(savedTheme);
+    }
+    
+    // Retrieve GitHub Token parameter if persistent
+    const savedGitToken = localStorage.getItem('github-token');
+    if (savedGitToken) {
+      setGithubToken(savedGitToken);
+    }
+
+    // Restore active workspace project after an automatic page reload
+    const savedProjectId = sessionStorage.getItem('current-project-id');
+    if (savedProjectId) {
+      setCurrentProjectIdState(savedProjectId);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    localStorage.setItem('ide-theme', nextTheme);
+  };
+
+  // Reset synced file caches when leaving or switching projects
+  useEffect(() => {
+    if (!currentProjectId) {
+      lastSyncedFilesRef.current = [];
+      lastChangeTimestampRef.current = 0;
+    }
+  }, [currentProjectId]);
+
+  // Auth Listener Connection Hook with token support
+  useEffect(() => {
+    if (!auth) {
+      setAuthLoading(false);
+      return;
+    }
+
+    const authTimeout = setTimeout(() => {
+      setAuthBootError('Auth bootstrap timed out. Opening sign-in screen.');
+      setAuthLoading(false);
+    }, 8000);
+
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        try {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } catch (e) {
+          await signInAnonymously(auth);
+        }
+      } else {
+        try {
+          await signInAnonymously(auth);
+        } catch (e) {
+          setAuthBootError('Auth service unavailable. Opening sign-in screen.');
+        }
+      }
+      setAuthLoading(false);
+    };
+    initAuth().finally(() => {
+      clearTimeout(authTimeout);
+      setAuthLoading(false);
+    });
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setTheme('dark');
+      localStorage.setItem('ide-theme', 'dark');
+      setUser(currentUser);
+      setAuthLoading(false);
+      if (!currentUser) {
+        setCurrentProjectId(null);
+        setProjects([]);
+      }
+    });
+    return () => {
+      clearTimeout(authTimeout);
+      unsubscribe();
+    };
+  }, []);
+
+  // Fetch User Projects, Admin privileges and Hackathon System Configurations
+  useEffect(() => {
+    if (!user || !db) {
+      // Mock localized projects for offline testing when firebase config isn't supplied
+      setIsAdmin(true); // Let's enable Admin mode by default in offline fallback mode for painless testing!
+      if (projects.length === 0) {
+        setProjects([{
+          id: 'local-demo-project',
+          name: 'hackathon-demo-project',
+          memberEmails: ['offline-developer@youthdevs.me'],
+          memberUids: ['mock-user-123'],
+          files: [
+            {
+              id: 'index-html',
+              name: 'index.html',
+              language: 'html',
+              content: `<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
+  <div class="text-center p-6 bg-slate-800 rounded-xl border border-indigo-500/20">
+    <h1 class="text-2xl font-bold text-indigo-400">Offline Demonstration Project</h1>
+    <p class="text-xs text-slate-400 mt-2 font-mono">Fill in your __firebase_config values to enable live cloud features!</p>
+  </div>
+</body>
+</html>`
+            }
+          ]
+        }]);
+      }
+      return;
+    }
+
+    const userProfileRef = doc(db, 'users', user.uid);
+    const unsubProfile = onSnapshot(userProfileRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setSuperchargeUses(data.superchargeUses || 0);
+        setCooldownEndTime(data.cooldownEndTime || null);
+        
+        // Mark admin based on Firestore configurations
+        setIsAdmin(data.isAdmin || false);
+      } else {
+        try {
+          await setDoc(userProfileRef, { email: user.email || 'anonymous@youthdevs.me', superchargeUses: 0, cooldownEndTime: null, isAdmin: false }, { merge: true });
+        } catch (err) {
+          console.error("Failed to initialize user document:", err);
+        }
+      }
+      fetchTotalUsersCount();
+    });
+
+    // Subscribe to Hackathon Config Node globally
+    const hackathonConfigRef = doc(db, 'system', 'hackathon');
+    const unsubHackathon = onSnapshot(hackathonConfigRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setHackathonActive(data.active || false);
+        setSubmissionsEnabled(data.submissionsEnabled || false);
+      } else {
+        // Safe defaults initialization
+        setDoc(hackathonConfigRef, { active: false, submissionsEnabled: false }).catch(() => {});
+      }
+    });
+
+    // TEAM ACCOMMODATION: Query all projects where user.uid is contained inside memberUids array
+    const q = query(collection(db, 'projects'), where('memberUids', 'array-contains', user.uid));
+    const unsubProjects = onSnapshot(q, (snapshot) => {
+      const projs = [];
+      snapshot.forEach(doc => projs.push({ id: doc.id, ...doc.data() }));
+      setProjects(projs);
+    });
+
+    fetchTotalUsersCount();
+
+    return () => {
+      unsubProfile();
+      unsubHackathon();
+      unsubProjects();
+    };
+  }, [user]);
+
+  // Admin Live Projects Snapshot listener (Fetches hackathon-marked projects)
+  useEffect(() => {
+    if (!canAccessAdminPanel || !db) return;
+
+    const projectsRef = collection(db, 'projects');
+    const unsubAdminProjects = onSnapshot(projectsRef, (snapshot) => {
+      const allProjects = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.isHackathonProject) {
+          allProjects.push({ id: doc.id, ...data });
+        }
+      });
+      setGlobalHackathonProjects(allProjects);
+    });
+
+    return () => unsubAdminProjects();
+  }, [canAccessAdminPanel]);
+
+  // Fetch GitHub User parameters when token is parsed
+  useEffect(() => {
+    if (!githubToken) {
+      setGithubUser(null);
+      return;
+    }
+
+    fetch('https://api.github.com/user', {
+      headers: { Authorization: `token ${githubToken}` }
+    })
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Unauthorized GitHub Token');
+      })
+      .then(data => {
+        setGithubUser(data);
+      })
+      .catch(err => {
+        console.error(err);
+        localStorage.removeItem('github-token');
+        setGithubToken(null);
+      });
+  }, [githubToken]);
+
+  // Sync Live Workspace Presence Matrix 
+  useEffect(() => {
+    if (!currentProjectId || !user || !activeFileId || !db) return;
+
+    const projectRef = doc(db, 'projects', currentProjectId);
+    const dynamicPresenceKey = `presence.${activeFileId}`;
+    const userHandle = user.email ? user.email.split('@')[0] : 'anonymous';
+
+    // Mark current user as active editor of this specific file index
+    updateDoc(projectRef, {
+      [dynamicPresenceKey]: userHandle
+    }).catch(err => console.error("Presence sync failed:", err));
+
+    return () => {
+      // Clear presence markers when navigating away or switching files
+      updateDoc(projectRef, {
+        [dynamicPresenceKey]: null
+      }).catch(() => {});
+    };
+  }, [activeFileId, currentProjectId, user]);
+
+  // Real-Time Active File Array Sync Node (Optimized for instant teammate refreshes & GitHub file system sync)
+  useEffect(() => {
+    if (!user || !currentProjectId) return;
+
+    // Handle local offline sync
+    if (!db) {
+      const activeProj = projects.find(p => p.id === currentProjectId);
+      if (activeProj && files.length === 0) {
+        setFiles(activeProj.files || []);
+        if (activeProj.files && activeProj.files.length > 0) {
+          setActiveFileId(activeProj.files[0].id);
+          setSelectedContextIds(activeProj.files.map(f => f.id));
+        }
+      }
+      return;
+    }
+
+    const projectRef = doc(db, 'projects', currentProjectId);
+    const unsubProjectFiles = onSnapshot(projectRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const incomingFiles = data.files || [];
+        
+        // AUTOMATIC PAGE RELOAD TRIGGER: Detect remote commits in real-time
+        if (data.lastChange && data.lastChange.timestamp) {
+          const currentHandle = user.email ? user.email.split('@')[0] : 'anonymous';
+          const isOtherUser = data.lastChange.by !== currentHandle;
+          
+          if (lastChangeTimestampRef.current === 0) {
+            lastChangeTimestampRef.current = data.lastChange.timestamp;
+          } else if (isOtherUser && data.lastChange.timestamp > lastChangeTimestampRef.current) {
+            lastChangeTimestampRef.current = data.lastChange.timestamp;
+            // Hot reload instantly to sync Monaco and Frame previews cleanly
+            window.location.reload();
+            return;
+          }
+        }
+
+        // HYBRID LOAD SEQUENCE: If GitHub is active, we have a token, and Firestore is completely empty, lazy-load from GitHub once
+        if (data.githubRepo && data.githubOwner && githubToken && incomingFiles.length === 0) {
+          try {
+            const branch = data.githubBranch || 'main';
+            const res = await fetch(`https://api.github.com/repos/${data.githubOwner}/${data.githubRepo}/contents?ref=${branch}`, {
+              headers: { Authorization: `token ${githubToken}` }
+            });
+            if (res.ok) {
+              const contents = await res.json();
+              const loadedFiles = await Promise.all(
+                contents.filter(item => item.type === 'file').map(async (item) => {
+                  // Fetch private files content from the JSON Contents API endpoint and decode locally
+                  const rawRes = await fetch(`https://api.github.com/repos/${data.githubOwner}/${data.githubRepo}/contents/${item.path}?ref=${branch}`, {
+                    headers: { 
+                      Authorization: `token ${githubToken}`,
+                      Accept: 'application/vnd.github.v3+json'
+                    }
+                  });
+                  let rawContent = '';
+                  if (rawRes.ok) {
+                    const fileDetails = await rawRes.json();
+                    rawContent = fileDetails.content ? decodeBase64Utf8(fileDetails.content.replace(/\s/g, '')) : '';
+                  } else {
+                    rawContent = 'Error loading content';
+                  }
+                  
+                  let language = 'html';
+                  if (item.name.endsWith('.css')) language = 'css';
+                  if (item.name.endsWith('.js')) language = 'javascript';
+                  return {
+                    id: item.sha,
+                    name: item.name,
+                    language,
+                    content: rawContent
+                  };
+                })
+              );
+
+              if (!filesAreIdentical(loadedFiles, lastSyncedFilesRef.current)) {
+                setFiles(loadedFiles);
+                lastSyncedFilesRef.current = loadedFiles;
+                
+                if (loadedFiles.length > 0 && (!activeFileId || !loadedFiles.some(f => f.id === activeFileId))) {
+                  setActiveFileId(loadedFiles[0].id);
+                  setSelectedContextIds(loadedFiles.map(f => f.id));
+                }
+
+                // Mirror the loaded files back to Firestore so teammates without GitHub access can see them immediately!
+                await updateDoc(projectRef, { files: loadedFiles });
+              }
+            }
+          } catch (err) {
+            console.error("Failed to compile workspace files from GitHub repository:", err);
+          }
+        } else {
+          // Standard Firestore files load sync (Our primary local fallback cache for everyone!)
+          if (!filesAreIdentical(incomingFiles, lastSyncedFilesRef.current)) {
+            setFiles(incomingFiles);
+            lastSyncedFilesRef.current = incomingFiles;
+            
+            if (incomingFiles.length > 0 && (!activeFileId || !incomingFiles.some(f => f.id === activeFileId))) {
+              setActiveFileId(incomingFiles[0].id);
+              setSelectedContextIds(incomingFiles.map(f => f.id));
+            }
+          }
+        }
+      }
+    });
+
+    return () => unsubProjectFiles();
+  }, [user, currentProjectId, activeFileId, githubToken, projects]);
+
+  // RUNTIME MONACO EDITOR SCRIPT LOADER (Bypasses compile-time dependencies perfectly)
+  useEffect(() => {
+    if (window.monaco) {
+      setMonacoLoaded(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js';
+    script.async = true;
+    const monacoTimeout = setTimeout(() => {
+      if (!window.monaco) {
+        console.warn('Monaco loader timed out, falling back to plain workspace rendering.');
+        setMonacoLoaded(true);
+      }
+    }, 10000);
+    script.onload = () => {
+      window.require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+      window.require(['vs/editor/editor.main'], () => {
+        clearTimeout(monacoTimeout);
+        setMonacoLoaded(true);
+      });
+    };
+    script.onerror = () => {
+      clearTimeout(monacoTimeout);
+      setMonacoLoaded(true);
+    };
+    document.body.appendChild(script);
+    return () => clearTimeout(monacoTimeout);
+  }, []);
+
+  // Stable callback handler vector pointing to event listeners
+  const handleEditorChange = (val) => {
+    if (isInternalChangeRef.current) return;
+    setFiles(prevFiles => prevFiles.map(f => f.id === activeFileIdRef.current ? { ...f, content: val || '' } : f));
+  };
+
+  const handleEditorChangeRef = useRef(handleEditorChange);
+  useEffect(() => {
+    handleEditorChangeRef.current = handleEditorChange;
+  });
+
+  // Update Monaco content and properties on file activation or model changes
+  useEffect(() => {
+    if (!monacoLoaded || !editorContainerRef.current || !currentActiveFile) return;
+
+    if (editorInstanceRef.current) {
+      editorInstanceRef.current.dispose();
+    }
+
+    editorInstanceRef.current = window.monaco.editor.create(editorContainerRef.current, {
+      value: currentActiveFile.content,
+      language: currentActiveFile.language === 'javascript' ? 'javascript' : currentActiveFile.language,
+      theme: theme === 'dark' ? 'vs-dark' : 'vs',
+      minimap: { enabled: false },
+      fontSize: 14,
+      automaticLayout: true,
+      wordWrap: 'on'
+    });
+
+    const changeListener = editorInstanceRef.current.onDidChangeModelContent(() => {
+      const val = editorInstanceRef.current.getValue();
+      handleEditorChangeRef.current(val);
+    });
+
+    return () => {
+      if (changeListener) changeListener.dispose();
+      if (editorInstanceRef.current) {
+        editorInstanceRef.current.dispose();
+      }
+    };
+  }, [monacoLoaded, activeFileId, theme]);
+
+  // REAL-TIME SYNCHRONIZATION ALIGNER: Updates Monaco Editor content dynamically when changes occur
+  useEffect(() => {
+    if (!monacoLoaded || !editorInstanceRef.current || !currentActiveFile) return;
+
+    const currentEditorValue = editorInstanceRef.current.getValue();
+    if (currentEditorValue !== currentActiveFile.content) {
+      // Intelligently save the user's cursor positions and scroll states to prevent jumping!
+      const viewState = editorInstanceRef.current.saveViewState();
+      isInternalChangeRef.current = true;
+      editorInstanceRef.current.setValue(currentActiveFile.content);
+      isInternalChangeRef.current = false;
+      if (viewState) {
+        editorInstanceRef.current.restoreViewState(viewState);
+      }
+    }
+  }, [currentActiveFile?.content, monacoLoaded]);
+
+  // Query Total Users Count
+  const fetchTotalUsersCount = async () => {
+    if (!db) return;
+    try {
+      const coll = collection(db, 'users');
+      const snapshot = await getCountFromServer(coll);
+      setTotalUsers(snapshot.data().count ?? 0);
+    } catch (err) {
+      console.warn("Firestore list rules blocked counting users. Falling back gracefully. Error:", err.message);
+      setTotalUsers(1); 
+    }
+  };
+
+  // Cooldown countdown tracking routine
+  useEffect(() => {
+    if (!cooldownEndTime) return;
+    const interval = setInterval(async () => {
+      const distance = cooldownEndTime - Date.now();
+      if (distance <= 0) {
+        setCooldownEndTime(null);
+        setSecondsLeft(0);
+        setSuperchargeUses(0);
+        if (user && db) {
+          try {
+            await setDoc(doc(db, 'users', user.uid), { superchargeUses: 0, cooldownEndTime: null }, { merge: true });
+          } catch (err) {
+            console.error("Failed to clear cooldown in database:", err);
+          }
+        }
+        clearInterval(interval);
+      } else {
+        setSecondsLeft(Math.ceil(distance / 1005));
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [cooldownEndTime, user]);
+
+  useEffect(() => {
+    if (consoleBottomRef.current) consoleBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, [consoleLogs]);
+
+  // UI Split Drag Handlers
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (isResizingLeft.current) setLeftWidth(Math.max(180, Math.min(400, e.clientX)));
+      if (isResizingCenter.current) setCenterWidth(Math.max(300, Math.min(window.innerWidth - leftWidth - 200, e.clientX - leftWidth)));
+      if (isResizingFooter.current) setFooterHeight(Math.max(120, Math.min(500, window.innerHeight - e.clientY)));
+    };
+    const handleMouseUp = () => {
+      isResizingLeft.current = false; isResizingCenter.current = false; isResizingFooter.current = false;
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [leftWidth]);
+
+  // --- AUTH OPERATIONS ---
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    if (!auth) {
+      setAuthError('Authentication Service is offline. Please supply Firebase credentials.');
+      return;
+    }
+    try {
+      if (isSignUp) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (err) {
+      setAuthError(err.message.replace('Firebase: ', ''));
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setAuthError('');
+    if (!auth) {
+      setAuthError('Authentication Service is offline.');
+      return;
+    }
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      setAuthError(err.message);
+    }
+  };
+
+  // GITHUB DIRECT WORKSPACE OAUTH SIGN-IN
+  const handleGithubSignIn = async () => {
+    setAuthError('');
+    if (!auth) {
+      setAuthError('Authentication Service is offline.');
+      return;
+    }
+    try {
+      const provider = new GithubAuthProvider();
+      provider.addScope('repo'); // Requests write credentials for collaborative code storage
+      const result = await signInWithPopup(auth, provider);
+      const credential = GithubAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+      if (token) {
+        localStorage.setItem('github-token', token);
+        setGithubToken(token);
+      }
+    } catch (err) {
+      setAuthError(err.message);
+    }
+  };
+
+  // --- PROJECT SETUP FOR COLLABORATIVE TEAMS AND GITHUB STORAGE REPOS ---
+  const handleCreateProject = async (e) => {
+    e.preventDefault();
+    if (!newProjectName.trim() || !user) return;
+    setDashboardError(''); 
+    
+    // Offline creation guard
+    if (!db) {
+      const newLocalId = `project-${Date.now()}`;
+      const localSlug = slugifyProjectName(newProjectName.trim());
+      const newLocalProj = {
+        id: newLocalId,
+        slug: localSlug,
+        name: newProjectName.trim(),
+        memberEmails: ['offline-developer@youthdevs.me'],
+        memberUids: ['mock-user-123'],
+        files: [
+          {
+            id: 'index-html',
+            name: 'index.html',
+            language: 'html',
+            content: `<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
+  <div class="text-center p-6 bg-slate-800 rounded-xl">
+    <h1 class="text-2xl font-bold text-indigo-400">${newProjectName}</h1>
+    <p class="text-xs text-slate-400 mt-2 font-mono">Local development mode is online.</p>
+  </div>
+</body>
+</html>`
+          }
+        ]
+      };
+      setProjects([...projects, newLocalProj]);
+      setNewProjectName('');
+      router.push(`/${localSlug || newLocalId}`);
+      return;
+    }
+
+    setIsCreatingProject(true); // Set Loading overlay status
+    setProjectStatusMessage('Preparing workspace metadata...');
+
+    const cleanedRepoName = newProjectName.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+    const newProjectSlug = slugifyProjectName(newProjectName.trim());
+    const defaultFiles = [
+      {
+        id: 'index-html',
+        name: 'index.html',
+        language: 'html',
+        content: `<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
+  <div class="text-center p-6 bg-slate-800 rounded-xl">
+    <h1 class="text-2xl font-bold text-indigo-400">${newProjectName}</h1>
+    <p class="text-xs text-slate-400 mt-2 font-mono">Workspace online. Happy hackathon coding!</p>
+  </div>
+</body>
+</html>`
+      }
+    ];
+
+    try {
+      let gitRepoName = '';
+      let gitOwner = '';
+
+      // CREATE GITHUB REPOSITORY IF CHECKBOX INITIATED
+      if (useGithubForNewProject && githubToken && githubUser) {
+        setProjectStatusMessage('Creating private GitHub repository...');
+        const repoRes = await fetch('https://api.github.com/user/repos', {
+          method: 'POST',
+          headers: {
+            Authorization: `token ${githubToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/vnd.github.v3+json'
+          },
+          body: JSON.stringify({
+            name: cleanedRepoName,
+            private: true,
+            auto_init: true // Generates base commit to hook our files tree directly on branch creation
+          })
+        });
+
+        if (!repoRes.ok) {
+          const errData = await repoRes.json();
+          throw new Error(`GitHub repo creation failed: ${errData.message}`);
+        }
+
+        const repoData = await repoRes.json();
+        gitRepoName = repoData.name;
+        gitOwner = repoData.owner.login;
+
+        // SECURE REFERENCE HANDSHAKE POLLING: Wait until GitHub registers the initial main branch!
+        setProjectStatusMessage('Spawning main branch on GitHub...');
+        let retries = 5;
+        let refAccessible = false;
+        while (retries > 0 && !refAccessible) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          try {
+            const checkRef = await fetch(`https://api.github.com/repos/${gitOwner}/${gitRepoName}/git/refs/heads/main`, {
+              headers: { Authorization: `token ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+            });
+            if (checkRef.ok) {
+              refAccessible = true;
+            }
+          } catch (e) {
+            // Silence and retry
+          }
+          retries--;
+        }
+
+        if (!refAccessible) {
+          throw new Error('GitHub branch reference handshake timeout. Please check your network connection.');
+        }
+
+        setProjectStatusMessage('Deploying initial index.html templates...');
+        await pushCommitToGithub(gitOwner, gitRepoName, 'main', defaultFiles, 'Initial project build', githubToken);
+      }
+
+      setProjectStatusMessage('Syncing project variables with team roster...');
+      await addDoc(collection(db, 'projects'), {
+        slug: newProjectSlug,
+        name: newProjectName.trim(),
+        userId: user.uid, 
+        memberUids: [user.uid], 
+        memberEmails: [user.email || 'anonymous'], 
+        presence: {},          
+        files: defaultFiles, // Always initialize defaultFiles in Firestore so non-GitHub teammates can see them immediately!
+        githubRepo: gitRepoName || null,
+        githubOwner: gitOwner || null,
+        githubBranch: gitRepoName ? 'main' : null,
+        createdAt: serverTimestamp(),
+        lastChange: {
+          by: user.email ? user.email.split('@')[0] : 'anonymous',
+          message: 'Workspace Initialized'
+        }
+      });
+      
+      setNewProjectName('');
+      setUseGithubForNewProject(false);
+      router.push(`/${newProjectSlug || cleanedRepoName || 'project'}`);
+    } catch (err) {
+      console.error(err);
+      setDashboardError(err.message || 'Permission denied. Make sure your Firestore rules match your project schema!');
+    } finally {
+      setIsCreatingProject(false); // Clear Loading status overlay
+      setProjectStatusMessage('');
+    }
+  };
+
+  // --- ADD TEAMMATE PIPELINE RUNNER ---
+  const handleAddTeammateSubmit = async (e) => {
+    e.preventDefault();
+    setInviteStatus('');
+    const targetEmail = teammateEmailInput.trim().toLowerCase();
+    const userEmailSafe = user.email ? user.email.toLowerCase() : '';
+    
+    if (!targetEmail || !currentProjectId) return;
+    if (targetEmail === userEmailSafe) {
+      setInviteStatus('You are already the project owner.');
+      return;
+    }
+    if (activeProjectData?.memberEmails?.map(m => m.toLowerCase()).includes(targetEmail)) {
+      setInviteStatus('User is already added to this project.');
+      return;
+    }
+    if (activeProjectData?.memberUids?.length >= 3) {
+      setInviteStatus('Team capacity full! Maximum 3 developers per project container.');
+      return;
+    }
+
+    if (!db) {
+      setInviteStatus('Cloud sync is offline during local demonstration mode.');
+      return;
+    }
+
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', targetEmail));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        setInviteStatus('Teammate profile not found. Have them sign in once first!');
+        return;
+      }
+
+      const teammateDoc = querySnapshot.docs[0];
+      const teammateUid = teammateDoc.id;
+
+      const projectRef = doc(db, 'projects', currentProjectId);
+      await updateDoc(projectRef, {
+        memberUids: arrayUnion(teammateUid),
+        memberEmails: arrayUnion(targetEmail)
+      });
+
+      setInviteStatus('Teammate synced successfully!');
+      setTeammateEmailInput('');
+    } catch (err) {
+      console.error(err);
+      setInviteStatus(err.message ? `Error: ${err.message}` : 'Error appending team credentials.');
+    }
+  };
+
+  // --- GIT DATABASE MULTI-FILE ATOMIC COMMIT MECHANISM ---
+  const pushCommitToGithub = async (owner, repo, branch, filesToCommit, commitMessage, token) => {
+    const authHeader = {
+      'Authorization': `token ${token}`,
+      'Accept': 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json'
+    };
+
+    // 1. Fetch reference details for current active branch head
+    const refRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
+      headers: authHeader
+    });
+    if (!refRes.ok) throw new Error('Could not get branch reference parameters.');
+    const refData = await refRes.json();
+    const currentCommitSha = refData.object.sha;
+
+    // 2. Fetch parent commit details to find parent tree
+    const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/commits/${currentCommitSha}`, {
+      headers: authHeader
+    });
+    if (!commitRes.ok) throw new Error('Could not find parent commit data.');
+    const commitData = await commitRes.json();
+    const baseTreeSha = commitData.tree.sha;
+
+    // 3. Assembly of blob modifications arrays
+    const treeItems = filesToCommit.map(file => ({
+      path: file.name,
+      mode: '100644',
+      type: 'blob',
+      content: file.content
+    }));
+
+    // 4. Create new compiled Git Tree
+    const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees`, {
+      method: 'POST',
+      headers: authHeader,
+      body: JSON.stringify({
+        base_tree: baseTreeSha,
+        tree: treeItems
+      })
+    });
+    if (!treeRes.ok) throw new Error('Could not compile Git Tree contents.');
+    const treeData = await treeRes.json();
+    const newTreeSha = treeData.sha;
+
+    // 5. Create atomic commit vectors
+    const newCommitRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/commits`, {
+      method: 'POST',
+      headers: authHeader,
+      body: JSON.stringify({
+        message: commitMessage,
+        tree: newTreeSha,
+        parents: [currentCommitSha]
+      })
+    });
+    if (!newCommitRes.ok) throw new Error('Could not write commit details.');
+    const newCommitData = await newCommitRes.json();
+    const newCommitSha = newCommitData.sha;
+
+    // 6. Push head references update
+    const updateRefRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
+      method: 'PATCH',
+      headers: authHeader,
+      body: JSON.stringify({
+        sha: newCommitSha,
+        force: true
+      })
+    });
+    if (!updateRefRes.ok) throw new Error('Could not shift branch pointers.');
+    return newCommitSha;
+  };
+
+  // --- INTERCEPT WORKSPACE CHANGES & ASK FOR CHANGE DESCRIPTION ---
+  const triggerPushCommitModal = (updatedFiles) => {
+    setPendingFilesToSync(updatedFiles);
+    setChangeNameInput('');
+    setShowChangeModal(true);
+  };
+
+  const handleConfirmChangeCommit = async (e) => {
+    e.preventDefault();
+    if (!changeNameInput.trim() || !pendingFilesToSync || !currentProjectId) return;
+
+    // Offline modification fallback handler
+    if (!db) {
+      setFiles(pendingFilesToSync);
+      const updatedProjects = projects.map(p => p.id === currentProjectId ? {
+        ...p,
+        files: pendingFilesToSync,
+        lastChange: {
+          by: 'offline-developer',
+          message: changeNameInput.trim(),
+          timestamp: Date.now()
+        }
+      } : p);
+      setProjects(updatedProjects);
+      setShowChangeModal(false);
+      setPendingFilesToSync(null);
+      setConsoleLogs(prev => [...prev, `SUCCESS: Simulated sync completed - "${changeNameInput.trim()}"`]);
+      return;
+    }
+
+    try {
+      const projectRef = doc(db, 'projects', currentProjectId);
+      const userHandle = user.email ? user.email.split('@')[0] : 'anonymous';
+
+      // IF WORKSPACE IS LINKED TO GITHUB, PUSH FILES ATOMICALLY VIA OAUTH
+      if (activeProjectData?.githubRepo && activeProjectData?.githubOwner && githubToken) {
+        setConsoleLogs(prev => [...prev, 'SYSTEM: Syncing multi-file updates to GitHub branch...']);
+        const branch = activeProjectData.githubBranch || 'main';
+        await pushCommitToGithub(
+          activeProjectData.owner || activeProjectData.githubOwner,
+          activeProjectData.githubRepo,
+          branch,
+          pendingFilesToSync,
+          changeNameInput.trim(),
+          githubToken
+        );
+      }
+
+      // Always update Firestore "files" array with pendingFilesToSync.
+      // Keeping Firestore mirroring active allows teammates who do NOT have GitHub connected to see the latest code instantly in real-time!
+      await updateDoc(projectRef, {
+        files: pendingFilesToSync,
+        lastChange: {
+          by: userHandle,
+          message: changeNameInput.trim(),
+          timestamp: Date.now()
+        }
+      });
+
+      // HOT RELOAD OPTIMIZATION: Update state immediately so changes render on the explorer instantly
+      setFiles(pendingFilesToSync);
+      lastSyncedFilesRef.current = pendingFilesToSync; // Avoid self-sync triggers
+      setShowChangeModal(false);
+      setPendingFilesToSync(null);
+      setConsoleLogs(prev => [...prev, `SUCCESS: Sync completed - "${changeNameInput.trim()}"`]);
+    } catch (err) {
+      console.error(err);
+      setConsoleLogs(prev => [...prev, `CRITICAL: Sync failed: ${err.message}`]);
+    }
+  };
+
+  const handleCreateFile = async (e) => {
+    e.preventDefault();
+    if (!newFileName.trim()) return;
+    const name = newFileName.trim();
+    let language = 'html';
+    if (name.endsWith('.css')) language = 'css';
+    if (name.endsWith('.js')) language = 'javascript';
+
+    const newId = `file-${Date.now()}`;
+    const newFile = { id: newId, name, language, content: `` };
+    const nextFiles = [...files, newFile];
+    
+    setActiveFileId(newId);
+    setSelectedContextIds([...selectedContextIds, newId]);
+    setNewFileName('');
+    setShowNewFileInput(false);
+
+    // Prompt team member immediately to document the new file spawning action
+    triggerPushCommitModal(nextFiles);
+  };
+
+  const handleCloseFile = async (idToClose, e) => {
+    e.stopPropagation();
+    if (files.length <= 1) return;
+    const filtered = files.filter(f => f.id !== idToClose);
+    
+    if (activeFileId === idToClose) {
+      setActiveFileId(filtered[filtered.length - 1].id);
+    }
+
+    // Prompt team member immediately to document file removal
+    triggerPushCommitModal(filtered);
+  };
+
+  // 🚀 RESTORED HELPER: Compiler Sandbox Preview Assembler
+  const getBundledPreviewCode = () => {
+    const indexFile = files.find(f => f.name === 'index.html') || files[0];
+    if (!indexFile) return '';
+    let bundledHtml = indexFile.content;
+
+    files.forEach(file => {
+      if (file.language === 'css') {
+        const cssMatcher = new RegExp(`<link[^>]*href=["']\\.?/?${file.name}["'][^>]*>`, 'g');
+        bundledHtml = cssMatcher.test(bundledHtml) 
+          ? bundledHtml.replace(cssMatcher, `<style>\n${file.content}\n</style>`)
+          : bundledHtml.replace('</head>', `<style>\n${file.content}\n</style>\n</head>`);
+      }
+      if (file.language === 'javascript') {
+        const jsMatcher = new RegExp(`<script[^>]*src=["']\\.?/?${file.name}["'][^>]*>\\s*</script>`, 'g');
+        bundledHtml = jsMatcher.test(bundledHtml)
+          ? bundledHtml.replace(jsMatcher, `<script>\n${file.content}\n</script>`)
+          : bundledHtml.replace('</body>', `<script>\n${file.content}\n</script>\n</body>`);
+      }
+    });
+    return bundledHtml;
+  };
+
+  const refreshSandboxPreview = () => {
+    setPreviewHtml(getBundledPreviewCode());
+  };
+
+  const previewPlaceholderHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #050b08;
+      color: #86efac;
+      font-family: monospace;
+    }
+    .wrap {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .card {
+      max-width: 360px;
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      background: rgba(8, 20, 13, 0.9);
+      border-radius: 16px;
+      padding: 18px;
+    }
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .body {
+      font-size: 12px;
+      line-height: 1.6;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="title">Preview paused</div>
+      <div class="body">Click Refresh Preview to re-render the current project in the sandbox.</div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  const triggerMatrixTerminalStream = (stopRef) => {
+    const mockLogs = [
+      'CONNECT: Querying secure model transport pipelines...',
+      'SCAN: Structural project data map parsing sequence active...',
+      'CONTEXT: Resolving linked file buffer vectors into global prompt token stack...',
+      'PARSE: Evaluating document elements abstract structure configurations...',
+      'FETCH: Running parallel model reasoning matrices...',
+      'COMPILING: Structuring differential workspace patch components...'
+    ];
+    let idx = 0;
+    const intervalId = setInterval(() => {
+      if (!stopRef.current) return clearInterval(intervalId);
+      if (idx < mockLogs.length) {
+        setConsoleLogs(prev => [...prev, `INFO: ${mockLogs[idx]}`]);
+        idx++;
+      }
+    }, 400);
+    return intervalId;
+  };
+
+  // --- AGENT VIBE PIPELINE RUNNER ---
+  const handleAgenticVibeSubmit = async (e) => {
+    e.preventDefault();
+    if (!promptInput.trim() || isAiLoading || !currentProjectId) return;
+
+    if (isSupercharged && cooldownEndTime) {
+      alert(`Supercharge lock active. Wait ${secondsLeft} seconds.`);
+      return;
+    }
+
+    setIsAiLoading(true);
+    setConsoleLogs([`PROMPT: "${promptInput}"`, 'SYSTEM: Initializing agent ecosystem pipeline context...']);
+
+    const keepStreaming = { current: true };
+    const streamId = triggerMatrixTerminalStream(keepStreaming);
+
+    const repositoryStructure = files.map(f => ({ name: f.name, language: f.language }));
+    const selectedContextContents = files.filter(f => selectedContextIds.includes(f.id)).map(f => ({ name: f.name, content: f.content }));
+    const targetModel = isSupercharged ? 'gemini-3.5-flash' : 'gemini-3.1-flash-lite';
+
+    try {
+      const response = await fetch('/api/vibe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instruction: promptInput,
+          repositoryStructure,
+          contextFiles: selectedContextContents,
+          modelSelection: targetModel
+        })
+      });
+
+      const data = await response.json();
+      keepStreaming.current = false;
+      clearInterval(streamId);
+
+      if (data.filePatches && Array.isArray(data.filePatches)) {
+        let updatedFilesList = [...files];
+        let actionLogs = [];
+
+        data.filePatches.forEach(patch => {
+          const targetName = patch.name.trim();
+          if (patch.action === 'create') {
+            if (!updatedFilesList.some(f => f.name.toLowerCase() === targetName.toLowerCase())) {
+              let language = 'html';
+              if (targetName.endsWith('.css')) language = 'css';
+              if (targetName.endsWith('.js')) language = 'javascript';
+              updatedFilesList.push({ id: `file-${Date.now()}-${Math.random().toString(36).substr(2,4)}`, name: targetName, language, content: patch.content || '' });
+              actionLogs.push(`Added workspace document [${targetName}]`);
+            }
+          } else if (patch.action === 'update') {
+            updatedFilesList = updatedFilesList.map(f => f.name.toLowerCase() === targetName.toLowerCase() ? { ...f, content: patch.content || '' } : f);
+            actionLogs.push(`Injected edits to document [${targetName}]`);
+          } else if (patch.action === 'delete') {
+            updatedFilesList = updatedFilesList.filter(f => f.name.toLowerCase() !== targetName.toLowerCase());
+            actionLogs.push(`Wiped document resource [${targetName}]`);
+          }
+        });
+
+        if (updatedFilesList.length === 0) {
+          updatedFilesList.push({ id: 'index-html', name: 'index.html', language: 'html', content: '' });
+        }
+
+        setLastModelUsed(targetModel === 'gemini-3.5-flash' ? 'Gemini 3.5 Flash' : 'Gemini 3.1 Flash-Lite');
+        setConsoleLogs(prev => [...prev, ...actionLogs.map(l => `SUCCESS: ${l}`), 'COMPLETED: AI patch generation complete. Preparing team change commit...']);
+        setPromptInput('');
+
+        // Token metric tracking updates
+        if (isSupercharged && db) {
+          const nextCount = superchargeUses + 1;
+          const userRef = doc(db, 'users', user.uid);
+          setSuperchargeUses(nextCount);
+          if (nextCount >= 10) {
+            const cooldownTime = Date.now() + 10 * 60 * 1000;
+            await setDoc(userRef, { superchargeUses: nextCount, cooldownEndTime: cooldownTime }, { merge: true });
+            setIsSupercharged(false);
+          } else {
+            await setDoc(userRef, { superchargeUses: nextCount }, { merge: true });
+          }
+        }
+
+        // Trigger pop up to name and sync the AI vibe additions
+        triggerPushCommitModal(updatedFilesList);
+      } else {
+        setConsoleLogs(prev => [...prev, `CRITICAL: Compilation failed. ${data.error || 'Check server configuration structure.'}`]);
+      }
+    } catch (err) {
+      keepStreaming.current = false; clearInterval(streamId);
+      setConsoleLogs(prev => [...prev, 'CRITICAL: Engine compilation network failure.']);
+      console.error(err);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  // --- HACKATHON ASSIGNMENT FLOW FOR USERS (LIMIT TO 1 ACTIVE ASSIGNED PROJECT) ---
+  const handleToggleDeemHackathon = async (projectId, currentStatus) => {
+    if (!db || !user) return;
+    setDashboardError('');
+
+    try {
+      const batchPromises = projects.map(async (proj) => {
+        const pRef = doc(db, 'projects', proj.id);
+        if (proj.id === projectId) {
+          // Toggle project hackathon flag
+          await updateDoc(pRef, { isHackathonProject: !currentStatus });
+        } else if (proj.isHackathonProject) {
+          // Remove from other projects to fulfill "up to one project" constraint
+          await updateDoc(pRef, { isHackathonProject: false });
+        }
+      });
+      await Promise.all(batchPromises);
+    } catch (err) {
+      console.error(err);
+      setDashboardError("Failed to update Hackathon configuration status.");
+    }
+  };
+
+  // --- SUBMIT WORKSPACE TO ADMIN FOR GRADING ---
+  const handleSubmitProjectToAdmin = async (projectId) => {
+    if (!db || !user) return;
+    try {
+      const pRef = doc(db, 'projects', projectId);
+      await updateDoc(pRef, { 
+        submitted: true,
+        submittedAt: Date.now()
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Failed to submit code template files to Admin.");
+    }
+  };
+
+  // --- GLOBAL ADMIN CONFIGURATION ACTIONS (Optimistic toggling for instant responsiveness!) ---
+  const handleToggleHackathonEvent = async () => {
+    const nextState = !hackathonActive;
+    setHackathonActive(nextState); // Optimistic update so switch animates instantly
+    
+    if (!db || !isAdmin) return;
+    try {
+      const configRef = doc(db, 'system', 'hackathon');
+      await setDoc(configRef, { active: nextState }, { merge: true });
+    } catch (err) {
+      console.error("Failed to sync Hackathon activation to Firestore:", err);
+    }
+  };
+
+  const handleToggleSubmissionGate = async () => {
+    const nextState = !submissionsEnabled;
+    setSubmissionsEnabled(nextState); // Optimistic update so switch animates instantly
+    
+    if (!db || !isAdmin) return;
+    try {
+      const configRef = doc(db, 'system', 'hackathon');
+      await setDoc(configRef, { submissionsEnabled: nextState }, { merge: true });
+    } catch (err) {
+      console.error("Failed to sync Submission gating to Firestore:", err);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#050b08] text-emerald-300'}`}>
+        <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent animate-spin rounded-full"></div>
+        CONNECTING TO YOUTHDEVS KERNEL...
+        {authBootError && <span className="text-[11px] text-slate-500 px-4 text-center max-w-md">{authBootError}</span>}
+      </div>
+    );
+  }
+
+  // --- RENDER 1: SIGN IN / SIGN UP SCREEN PANEL ---
+  if (!user) {
+    return (
+      <AuthScreen
+        theme={theme}
+        isSignUp={isSignUp}
+        email={email}
+        password={password}
+        authError={authError}
+        onToggleTheme={toggleTheme}
+        onAuthSubmit={handleAuthSubmit}
+        onGithubSignIn={handleGithubSignIn}
+        onGoogleSignIn={handleGoogleSignIn}
+        onToggleAuthMode={() => setIsSignUp(!isSignUp)}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+      />
+    );
+  }
+
+  if (routeMode === 'project' && !currentProjectId) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#050b08] text-emerald-300 font-mono text-xs">
+        Resolving project workspace...
+      </div>
+    );
+  }
+
+  // --- RENDER 2: DASHBOARD VIEW PANEL ---
+  if (!currentProjectId) {
+    return (
+    <div className={`h-screen w-screen flex flex-col font-sans transition-colors duration-200 relative ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
+        
+        {/* PROJECT CREATION LOADER OVERLAY STATUS PANEL */}
+        {isCreatingProject && (
+          <div className={`absolute inset-0 backdrop-blur-md flex flex-col items-center justify-center z-50 p-4 font-mono text-xs gap-3 ${theme === 'dark' ? 'bg-[#050b08]/85 text-emerald-300' : 'bg-white/85 text-emerald-700'}`}>
+            <div className="h-8 w-8 border-4 border-emerald-500 border-t-transparent animate-spin rounded-full" />
+            <span className="uppercase tracking-widest font-bold">Configuring Collaboration Layer</span>
+            <span className={`text-[11px] animate-pulse ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>⚙️ {projectStatusMessage}</span>
+          </div>
+        )}
+
+        <header className={`h-14 border-b px-6 flex items-center justify-between transition-colors ${theme === 'dark' ? 'border-emerald-900/30 bg-[#07120c]/70' : 'border-emerald-200 bg-white/80'}`}>
+          <div className="flex items-center gap-3">
+            <div className="h-7 w-7 bg-emerald-600 rounded-md flex items-center justify-center font-black text-sm text-white shadow-md shadow-emerald-950/20">Y</div>
+            <span className={`text-xs font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>YouthDevs Central Hub</span>
+          </div>
+          <div className="flex items-center gap-4">
+            
+            {/* ADMIN ACCESS CONTEXT SWITCHER TRIGGER BUTTON */}
+            {canAccessAdminPanel && (
+              <button 
+                onClick={() => router.push(isAdminRoute ? '/dashboard' : '/admin')} 
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold border hover:scale-105 transition-all ${
+                  isAdminRoute 
+                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' 
+                    : theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30 text-slate-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                }`}
+              >
+                <ShieldAlert size={12} />
+                <span>{isAdminRoute ? "Switch to Dashboard" : "Admin Panel"}</span>
+              </button>
+            )}
+
+            {/* DYNAMIC GITHUB HUBLINK CONTROLLER INDICATOR */}
+            {githubUser ? (
+              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${theme === 'dark' ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300' : 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300'}`}>
+                <Github size={11} />
+                <span>Git Connected: <b>{githubUser.login}</b></span>
+              </div>
+            ) : (
+              <button onClick={handleGithubSignIn} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border hover:scale-105 transition-all ${theme === 'dark' ? 'bg-amber-955/25 border-amber-900/30 text-amber-400' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                <Github size={11} />
+                <span>Link GitHub Account</span>
+              </button>
+            )}
+
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border ${theme === 'dark' ? 'bg-emerald-950/25 border-emerald-900/40 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+              <Users size={12} />
+              <span>IDE Users: <b className="font-mono font-bold">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
+            </div>
+
+            <button 
+              onClick={toggleTheme} 
+              className={`p-2 rounded-lg border transition-all shrink-0 ${theme === 'dark' ? 'border-emerald-900/30 text-emerald-300 hover:bg-[#0b1810]' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}
+              title="Toggle system theme"
+            >
+              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+
+            <span className="text-xs text-slate-500 font-mono hidden sm:inline">{user.email || 'anonymous@youthdevs.me'}</span>
+            <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-red-500 transition flex items-center gap-1 text-xs">
+              <LogOut size={13} /> Exit
+            </button>
+          </div>
+        </header>
+
+        {/* CONDITIONAL RENDER: HACKATHON ADMIN CONTROLLER PANEL VIEW */}
+        {canAccessAdminPanel && isAdminRoute ? (
+          <main className="flex-1 max-w-4xl w-full mx-auto p-6 md:p-10 overflow-y-auto">
+              <div className={`border p-6 rounded-2xl mb-8 ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 via-slate-950 to-emerald-900/20 border-emerald-900/30' : 'bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border-emerald-200'}`}>
+              <div className="flex items-center gap-2 text-emerald-300 font-bold mb-2">
+                <ShieldAlert size={20} />
+                <h2 className="text-lg">Hackathon Control Center</h2>
+              </div>
+              <p className={`text-xs max-w-xl ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                As a project administrator, you can toggle global Hackathon event registrations, open submission gateways, and dynamically view/inspect active submission source trees in real-time.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-mono">
+                <span className={`px-2 py-1 rounded-full border ${customDomainMode ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                  Domain mode: {customDomainMode ? 'Custom youthdevs.me aliases' : 'Standard vercel.app aliases'}
+                </span>
+                <span className={`px-2 py-1 rounded-full border ${theme === 'dark' ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-emerald-700 border-emerald-200'}`}>
+                  Submissions: {globalHackathonProjects.length}
+                </span>
+              </div>
+
+              <div className={`mt-4 flex items-center justify-between p-3.5 rounded-xl max-w-md ${theme === 'dark' ? 'bg-slate-950/40 border border-slate-800/80' : 'bg-white border border-emerald-200'}`}>
+                <div className="flex flex-col gap-0.5">
+                  <span className={`text-xs font-bold ${theme === 'dark' ? 'text-slate-200' : 'text-emerald-900'}`}>Domain Mode Override</span>
+                  <span className={`text-[10px] ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Switch between youthdevs.me aliases and standard vercel.app links</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCustomDomainMode((prev) => !prev)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${
+                    customDomainMode ? 'bg-emerald-600' : 'bg-slate-800'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${
+                      customDomainMode ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* BEAUTIFUL VISUAL SWITCH TOGGLES (iOS-style optimistic interactive switches) */}
+              <div className="mt-6 flex flex-col gap-5 max-w-md">
+                
+                {/* Switch 1: Global Hackathon Event */}
+                <div className={`flex items-center justify-between p-3.5 rounded-xl ${theme === 'dark' ? 'bg-slate-950/40 border border-emerald-900/30' : 'bg-white border border-emerald-200'}`}>
+                  <div className="flex flex-col gap-0.5">
+                    <span className={`text-xs font-bold ${theme === 'dark' ? 'text-slate-200' : 'text-emerald-900'}`}>Hackathon Event Status</span>
+                    <span className={`text-[10px] ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Toggle student assignment registration badges globally</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleToggleHackathonEvent}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${
+                      hackathonActive ? 'bg-rose-600' : 'bg-slate-800'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${
+                        hackathonActive ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Switch 2: Submission Gate (Rendered when event is active) */}
+                {hackathonActive && (
+                  <div className={`flex items-center justify-between p-3.5 rounded-xl animate-fade-in ${theme === 'dark' ? 'bg-slate-950/40 border border-emerald-900/30' : 'bg-white border border-emerald-200'}`}>
+                    <div className="flex flex-col gap-0.5">
+                      <span className={`text-xs font-bold ${theme === 'dark' ? 'text-slate-200' : 'text-emerald-900'}`}>Submission Gateway Portal</span>
+                      <span className={`text-[10px] ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Enable "Submit to Admin" buttons on student repos</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleSubmissionGate}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${
+                        submissionsEnabled ? 'bg-emerald-600' : 'bg-slate-800'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${
+                          submissionsEnabled ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`text-xs font-bold uppercase tracking-widest flex items-center gap-1 ${theme === 'dark' ? 'text-slate-500' : 'text-emerald-700'}`}>
+                <Award size={14} /> Registered Hackathon Submissions ({globalHackathonProjects.length})
+              </h3>
+            </div>
+
+            {globalHackathonProjects.length === 0 ? (
+              <div className={`text-center py-12 border border-dashed rounded-xl text-xs font-mono ${theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-emerald-200 text-emerald-700'}`}>
+                No active student teams have flagged their repositories as hackathon submissions yet.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {globalHackathonProjects.map(proj => (
+                  <div key={proj.id} className={`p-4 border rounded-xl flex items-center justify-between ${theme === 'dark' ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-emerald-200'}`}>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Folder size={15} className="text-emerald-500" />
+                        <span className={`text-sm font-bold ${theme === 'dark' ? 'text-white' : 'text-emerald-950'}`}>{proj.name}</span>
+                        {proj.submitted ? (
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Submitted</span>
+                        ) : (
+                          <span className="text-[10px] bg-amber-500/20 text-amber-500 border border-amber-500/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">In Progress</span>
+                        )}
+                      </div>
+                      <div className={`text-[11px] mt-2 font-mono ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Team Members: {proj.memberEmails?.join(', ')}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          setSelectedAdminProjectFiles(proj.files || []);
+                          if (proj.files && proj.files.length > 0) {
+                            setAdminActiveFileName(proj.files[0].name);
+                            setAdminActiveFileContent(proj.files[0].content);
+                          } else {
+                            setAdminActiveFileName('');
+                            setAdminActiveFileContent('');
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors"
+                      >
+                        <FileSearch size={13} />
+                        View Files
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </main>
+        ) : (
+          <main className="flex-1 max-w-4xl w-full mx-auto p-6 md:p-10 overflow-y-auto">
+            {/* OFFLINE DEMONSTRATION WORKSPACE CALLOUT */}
+            {!db && (
+              <div className="mb-6 p-4 rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-500 text-xs font-mono">
+                ⚠️ Simulated Localhost Demo Mode. To unlock persistent team databases, dynamic presence badges, and GitHub API handshakes, configure your <b>__firebase_config</b> environment values.
+              </div>
+            )}
+
+            {/* HACKATHON LIVE NOTIFICATION FOR USERS */}
+            {hackathonActive && (
+              <div className={`mb-6 p-5 rounded-2xl border flex items-center justify-between flex-wrap gap-3 ${theme === 'dark' ? 'border-emerald-500/30 bg-emerald-950/20' : 'border-emerald-200 bg-emerald-50'}`}>
+                <div>
+                  <div className={`flex items-center gap-1.5 font-bold text-sm ${theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                    <Award size={16} />
+                    <span>Active Hackathon Event is LIVE!</span>
+                  </div>
+                  <p className={`text-[11px] mt-1 max-w-xl font-mono ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+                    Deem one of your active projects below as your team submission to present it to the admins for validation.
+                  </p>
+                </div>
+                {submissionsEnabled && (
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider animate-pulse shrink-0">Submissions Open</span>
+                )}
+              </div>
+            )}
+
+            <div className={`border p-6 rounded-2xl mb-8 transition-colors ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 to-slate-900 border-slate-800/80' : 'bg-gradient-to-r from-emerald-50/70 to-white border-emerald-200'}`}>
+              <h2 className={`text-xl font-black ${theme === 'dark' ? 'text-white' : 'text-emerald-950'}`}>Welcome Back to Hackathon Core</h2>
+              <p className={`text-xs mt-1 max-w-lg ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Build collaborative multi-file web applications natively with your team of up to 3 members. Switch your workspace parameters to GitHub to save, track, and deploy code directly inside GitHub repos!</p>
+              
+              <form onSubmit={handleCreateProject} className="mt-4 flex flex-col gap-3 max-w-md">
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="New project or repository name..." 
+                    value={newProjectName} 
+                    onChange={e => setNewProjectName(e.target.value)} 
+                    required 
+                    className={`flex-1 border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark' ? 'bg-slate-955 border-slate-855 focus:border-emerald-500 text-slate-200' : 'bg-white border-emerald-200 focus:border-emerald-500 text-slate-900'}`} 
+                  />
+                  <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 rounded-lg flex items-center gap-1 transition shadow-lg shadow-emerald-650/10 shrink-0">
+                    <Plus size={14} /> Create Repo
+                  </button>
+                </div>
+
+                {/* GITHUB ENABLE SYNC TOGGLE */}
+                {githubUser && (
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none py-1">
+                    <input 
+                      type="checkbox" 
+                      checked={useGithubForNewProject} 
+                      onChange={e => setUseGithubForNewProject(e.target.checked)} 
+                      className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-emerald-50 h-4 w-4 bg-white"
+                    />
+                    <span className={`text-xs font-medium flex items-center gap-2 ${theme === 'dark' ? 'text-slate-300' : 'text-emerald-900'}`}>
+                      Initialize workspace as a private GitHub Repository
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-700 border border-emerald-500/30 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">WIP</span>
+                      <span className="text-[11px] opacity-75">({newProjectName.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-')})</span>
+                    </span>
+                  </label>
+                )}
+              </form>
+
+              {/* Dashboard Error Panel displaying Firestore Permission issues beautifully */}
+              {dashboardError && (
+                <p className="text-xs text-rose-400 font-mono mt-3 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg animate-shake">
+                  ⚠️ {dashboardError}
+                </p>
+              )}
+            </div>
+
+            <h3 className={`text-xs font-bold uppercase tracking-widest mb-3 ${theme === 'dark' ? 'text-slate-500' : 'text-emerald-700'}`}>Your Persistent Team Repositories</h3>
+            {projects.length === 0 ? (
+              <div className={`text-center py-12 border border-dashed rounded-xl text-xs font-mono ${theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-emerald-200 text-emerald-700'}`}>No active projects found. Type a title above to spawn your team repository.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {projects.map(proj => (
+                  <div key={proj.id} onClick={() => { setCurrentProjectId(proj.id); setFiles([]); setActiveFileId(''); setInviteStatus(''); }} className={`p-4 border rounded-xl cursor-pointer transition-all group relative ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-emerald-500/40 text-slate-300' : 'bg-white border-emerald-200 hover:border-emerald-500/45 text-slate-700 shadow-sm hover:shadow'}`}>
+                    <div className={`flex items-center justify-between font-bold text-sm transition-colors ${theme === 'dark' ? 'group-hover:text-emerald-500' : 'group-hover:text-emerald-700'}`}>
+                      <div className="flex items-center gap-2.5">
+                        <Folder size={16} className="text-emerald-500" />
+                        {proj.name}
+                      </div>
+                      <div className={`flex items-center gap-2 text-[10px] px-1.5 py-0.5 rounded ${theme === 'dark' ? 'text-slate-400 bg-slate-500/10' : 'text-emerald-700 bg-emerald-50'}`}>
+                        <Users size={10} />
+                        <span>{proj.memberUids?.length || 1}/3</span>
+                        {proj.githubRepo && <Github size={10} className="fill-emerald-500 text-emerald-500 shrink-0 ml-0.5" />}
+                      </div>
+                    </div>
+
+                    {/* HACKATHON ASSIGNMENT TOGGLE BUTTONS */}
+                    {hackathonActive && (
+                      <div className="mt-3 flex gap-2" onClick={e => e.stopPropagation()}>
+                        <button 
+                          onClick={() => handleToggleDeemHackathon(proj.id, proj.isHackathonProject || false)}
+                          className={`px-2 py-1 rounded text-[10px] font-mono font-bold border transition-all flex items-center gap-1 ${
+                            proj.isHackathonProject 
+                            ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' 
+                            : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          {proj.isHackathonProject ? <CheckSquare size={10} /> : <Square size={10} />}
+                          Deemed Submission
+                        </button>
+
+                        {/* SUBMIT BUTTON */}
+                        {proj.isHackathonProject && submissionsEnabled && !proj.submitted && (
+                          <button 
+                            onClick={() => handleSubmitProjectToAdmin(proj.id)}
+                            className="px-2 py-1 rounded text-[10px] font-mono font-bold bg-emerald-600 text-white hover:bg-emerald-500 shadow-md shadow-emerald-650/15"
+                          >
+                            Submit to Admin
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className={`flex justify-between items-center mt-4 text-[10px] font-mono ${theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}`}>
+                      <span className="truncate max-w-[150px]">Members: {proj.memberEmails?.map(m => m.split('@')[0]).join(', ')}</span>
+                      <span className="text-emerald-500 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all shrink-0">Open Workspace <ChevronRight size={10} /></span>
+                    </div>
+
+                    <div className="mt-3 flex justify-start" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => handleExportProjectToText(proj)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-700 text-xs font-bold transition-colors hover:bg-emerald-500/20 hover:border-emerald-400/30"
+                      >
+                        <Save size={12} />
+                        Export SkipCourse
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </main>
+        )}
+      </div>
+    );
+  }
+
+  // --- RENDER 3: PRIMARY WORKSPACE IDE VIEW ---
+  return (
+    <div className={`flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
+      <WorkspaceHeader
+        theme={theme}
+        user={user}
+        activeProjectData={activeProjectData}
+        totalUsers={totalUsers}
+        inviteStatus={inviteStatus}
+        teammateEmailInput={teammateEmailInput}
+        onBackToDashboard={() => setCurrentProjectId(null)}
+        onToggleTheme={toggleTheme}
+        onSignOut={() => signOut(auth)}
+        onAddTeammateSubmit={handleAddTeammateSubmit}
+        onTeammateEmailChange={setTeammateEmailInput}
+        onToggleSupercharge={() => !cooldownEndTime && setIsSupercharged(!isSupercharged)}
+        cooldownEndTime={cooldownEndTime}
+        secondsLeft={secondsLeft}
+        superchargeUses={superchargeUses}
+        isSupercharged={isSupercharged}
+        isCooldownActive={!!cooldownEndTime}
+      />
+
+      <main className="flex flex-1 w-full overflow-hidden relative min-h-0">
+        
+        {/* EXPLORER TREE VIEW PANEL WITH LIVE PRESENCE BADGES */}
+        <section style={{ width: `${leftWidth}px` }} className={`border-r flex flex-col h-full shrink-0 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c]/45' : 'border-emerald-900/25 bg-[#07120c]/45'}`}>
+          <div className={`p-3 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300' : 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300'}`}>
+            <span className="text-xs font-bold tracking-wider uppercase">Filesystem</span>
+            <button onClick={() => setShowNewFileInput(!showNewFileInput)} className={`p-1 rounded transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-500 hover:text-slate-855'}`}><Plus size={14} /></button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1 custom-scrollbar">
+            {showNewFileInput && (
+              <form onSubmit={handleCreateFile} className="mb-2">
+                <input type="text" autoFocus placeholder="filename.html..." value={newFileName} onChange={e => setNewFileName(e.target.value)} onBlur={() => setTimeout(() => setShowNewFileInput(false), 200)} className={`w-full border rounded px-2 py-1 text-xs outline-none font-mono ${theme === 'dark' ? 'bg-[#050b08] border-emerald-500 text-slate-200' : 'bg-[#050b08] border-emerald-500 text-slate-200'}`} />
+              </form>
+            )}
+            {files.map(file => {
+              const isActive = file.id === activeFileId;
+              
+              // Presence detection lookups
+              const currentFileViewer = activeProjectData?.presence?.[file.id];
+              const isTeammateActiveHere = currentFileViewer && currentFileViewer !== (user.email ? user.email.split('@')[0] : 'anonymous');
+
+              return (
+                <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer group text-xs font-mono border transition-all ${
+                  isActive 
+                    ? theme === 'dark' ? 'bg-indigo-600/15 border-indigo-500/20 text-slate-100 font-semibold' : 'bg-indigo-50 border-indigo-200 text-indigo-600 font-semibold'
+                    : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/40 border-transparent' : 'text-slate-600 hover:bg-slate-200/50 border-transparent'
+                }`}>
+                  <div className="flex items-center gap-2 overflow-hidden flex-1 mr-1">
+                    <div onClick={(e) => { e.stopPropagation(); selectedContextIds.includes(file.id) ? setSelectedContextIds(selectedContextIds.filter(id => id !== file.id)) : setSelectedContextIds([...selectedContextIds, file.id]) }} className={`hover:text-indigo-500 transition-colors p-0.5 ${theme === 'dark' ? 'text-slate-600' : 'text-slate-400'}`}>
+                      {selectedContextIds.includes(file.id) ? <CheckSquare size={13} className="text-indigo-500" /> : <Square size={13} />}
+                    </div>
+                    <FileCode size={13} className="shrink-0" />
+                    <span className="truncate">{file.name}</span>
+                  </div>
+                  
+                  {/* Real-time Team Member Edit Badge color assigned individually */}
+                  {isTeammateActiveHere && (() => {
+                    const idx = activeProjectData?.memberEmails?.findIndex(m => m.toLowerCase().split('@')[0] === currentFileViewer.toLowerCase());
+                    let badgeClass = "bg-slate-500/20 text-slate-400 border border-slate-500/30";
+                    if (idx === 0) badgeClass = theme === 'dark' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-emerald-50 text-emerald-700 border border-emerald-200";
+                    if (idx === 1) badgeClass = theme === 'dark' ? "bg-orange-500/20 text-orange-400 border border-orange-500/30" : "bg-orange-50 text-orange-700 border border-orange-200";
+                    if (idx === 2) badgeClass = theme === 'dark' ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" : "bg-blue-50 text-blue-700 border border-blue-200";
+                    return (
+                      <span className={`text-[8px] px-1 rounded scale-90 tracking-tighter uppercase shrink-0 animate-pulse font-bold ${badgeClass}`}>
+                        {currentFileViewer}
+                      </span>
+                    );
+                  })()}
+                  <X size={11} className={`opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-500 shrink-0 ml-1`} onClick={e => handleCloseFile(file.id, e)} />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ACTIVE MEMBERS IN THEIR RESPECTIVE COLORS LIST (Left Panel Footer Container) */}
+          {activeProjectData && (
+            <div className={`p-3 border-t shrink-0 transition-colors text-[11px] font-mono flex flex-col gap-1.5 ${theme === 'dark' ? 'border-slate-800/60 bg-slate-955/40' : 'border-slate-200 bg-slate-100'}`}>
+              <div className={`text-[10px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>Active Team</div>
+              <div className="flex flex-col gap-1">
+                {activeProjectData.memberEmails?.map((memberEmail, index) => {
+                  const handle = memberEmail.split('@')[0];
+                  let clr = 'text-slate-400';
+                  if (index === 0) clr = theme === 'dark' ? 'text-emerald-400 font-bold' : 'text-emerald-600 font-black';
+                  if (index === 1) clr = theme === 'dark' ? 'text-orange-400 font-bold' : 'text-orange-600 font-black';
+                  if (index === 2) clr = theme === 'dark' ? 'text-blue-400 font-bold' : 'text-blue-600 font-black';
+                  
+                  // Is this member current user?
+                  const isSelf = user && memberEmail.toLowerCase() === user.email?.toLowerCase();
+
+                  return (
+                    <div key={memberEmail} className="flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${
+                        index === 0 ? 'bg-emerald-500' : index === 1 ? 'bg-orange-500' : 'bg-blue-500'
+                      }`} />
+                      <span className={`${clr} truncate max-w-[150px]`}>
+                        {handle} {isSelf && <span className="opacity-50 text-[10px] font-normal">(Self)</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* DRAG HANDLER 1 */}
+        <div className={`w-1.5 h-full cursor-ew-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 shrink-0`} onMouseDown={() => { isResizingLeft.current = true; }} />
+
+        {/* CODE EDITOR WINDOW */}
+        <section style={{ width: `${centerWidth}px` }} className={`flex flex-col h-full shrink-0 overflow-hidden border-r transition-colors ${theme === 'dark' ? 'bg-[#07120c] border-emerald-900/25' : 'bg-[#07120c] border-emerald-900/25'}`}>
+          <div className={`h-9 border-b flex items-center justify-between overflow-x-auto shrink-0 select-none transition-colors ${theme === 'dark' ? 'bg-[#08140d]/60 border-emerald-900/20' : 'bg-[#08140d]/60 border-emerald-900/20'}`}>
+            <div className="flex items-center overflow-x-auto">
+              {files.map(file => {
+                const isActive = file.id === activeFileId;
+                return (
+                  <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`h-9 flex items-center gap-2 px-4 text-xs font-mono border-r cursor-pointer transition-all shrink-0 ${
+                    isActive 
+                      ? theme === 'dark' ? 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20' : 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20'
+                      : theme === 'dark' ? 'bg-[#07120c] text-slate-400 border-r-emerald-900/20' : 'bg-[#07120c] text-slate-400 border-r-emerald-900/20'
+                  }`}>
+                    <span>{file.name}</span>
+                    <X size={10} className="hover:text-red-500 transition-colors" onClick={e => handleCloseFile(file.id, e)} />
+                  </div>
+                );
+              })}
+            </div>
+
+          {/* ACTION COMPONENT: Commit / Save Push Workspace Change Trigger Button */}
+          {isDirty && (
+            <button 
+                onClick={() => triggerPushCommitModal(files)}
+                className="flex items-center gap-1 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md shadow-emerald-950/20 hover:scale-105 animate-pulse"
+              >
+                <Save size={12} />
+              <span>{activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Team Change'}</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 mr-2">
+            <input
+              type="text"
+              value={deployProjectName}
+              onChange={(e) => setDeployProjectName(e.target.value)}
+              placeholder="Vercel project name"
+              className={`w-40 text-xs font-mono px-3 py-1.5 rounded-lg border outline-none transition-colors ${
+                theme === 'dark'
+                  ? 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
+                  : 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
+              }`}
+            />
+            <button
+              onClick={handleDeployToVercel}
+              disabled={isDeployingToVercel || !files.length}
+              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-emerald-950/20"
+            >
+              <Zap size={12} />
+              <span>{isDeployingToVercel ? deployStatusMessage : 'Deploy to Vercel'}</span>
+            </button>
+          </div>
+        </div>
+
+        {(deployStatusMessage || deployError || deployUrl) && (
+          <div className={`px-4 py-2 border-b text-[11px] font-mono ${
+            theme === 'dark' ? 'border-emerald-900/20 bg-[#050b08]/80' : 'border-emerald-900/20 bg-[#050b08]/80'
+          }`}>
+            {deployStatusMessage && !deployError && (
+              <span className="text-emerald-400">{deployStatusMessage}</span>
+            )}
+            {deployError && (
+              <span className="text-rose-400">Deploy error: {deployError}</span>
+            )}
+            {deployUrl && (
+              <a
+                href={deployUrl.startsWith('http') ? deployUrl : `https://${deployUrl}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-300 hover:underline break-all"
+              >
+                Live deployment ({deployDomainMode || (customDomainMode ? 'custom' : 'vercel')}): {deployUrl}
+              </a>
+            )}
+          </div>
+        )}
+
+          <div className="flex-1 w-full overflow-hidden bg-[#050b08] relative">
+            {!monacoLoaded ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-xs font-mono text-indigo-400 gap-2">
+                <div className="h-5 w-5 border-2 border-indigo-500 border-t-transparent animate-spin rounded-full" />
+                <span>Booting Monaco Engine...</span>
+              </div>
+            ) : null}
+            <div ref={editorContainerRef} className="w-full h-full" />
+          </div>
+        </section>
+
+        {/* DRAG HANDLER 2 */}
+        <div className={`w-1.5 h-full cursor-ew-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 shrink-0`} onMouseDown={() => { isResizingCenter.current = true; }} />
+
+        {/* LIVE SANDBOX PREVIEW */}
+        <section className="flex-1 flex flex-col h-full overflow-hidden min-w-[200px] bg-[#07120c] transition-colors">
+          <div className="h-9 px-4 border-b flex items-center justify-between shrink-0 transition-colors bg-[#08140d]/60 border-emerald-900/20 text-slate-300">
+            <span className="text-xs font-semibold">Sandbox Preview Engine</span>
+            <button
+              type="button"
+              onClick={refreshSandboxPreview}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-500/20 bg-emerald-500/10 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/20 transition-colors"
+            >
+              <Zap size={10} />
+              Refresh Preview
+            </button>
+          </div>
+          <div className="flex-1 w-full bg-[#050b08] relative">
+            <iframe
+              title="Live View"
+              srcDoc={previewHtml || previewPlaceholderHtml}
+              sandbox="allow-scripts"
+              className="absolute inset-0 w-full h-full border-none"
+            />
+          </div>
+        </section>
+      </main>
+
+      {/* DRAG HANDLER 3 */}
+      <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-emerald-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-emerald-900/25' : 'border-emerald-900/25'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
+
+      {/* FOOTER INTERACT CONSOLE */}
+      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 flex gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-900/20 bg-[#07120c]/70'}`}>
+        <div className="flex-1 flex flex-col min-w-0 h-full">
+          <div className={`flex items-center gap-1.5 mb-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+            <Sparkles size={13} className={isAiLoading ? "animate-spin text-emerald-300" : ""} />
+            <span className="text-[11px] font-bold uppercase tracking-wider">Prompt Terminal</span>
+          </div>
+          <form onSubmit={handleAgenticVibeSubmit} className={`flex-1 flex items-stretch gap-2 border rounded-xl p-2 transition-all ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60' : 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60'}`}>
+            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Supercharge mode re-calibrating..." : "Instruct the file agent ecosystem to execute actions..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-200 placeholder-slate-500'}`} />
+            <button type="submit" disabled={isAiLoading || !promptInput.trim()} className="self-end flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition shrink-0 shadow-lg shadow-emerald-950/20">Vibe <ChevronRight size={12} /></button>
+          </form>
+        </div>
+
+        <div className={`w-1/2 flex flex-col min-w-[250px] border-l pl-4 h-full ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
+          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-300'}`}>
+            <div className="flex items-center gap-1.5"><Terminal size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Console Pipeline</span></div>
+            {lastModelUsed && <span className="text-[9px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/50 px-1.5 py-0.5 rounded-md">{lastModelUsed}</span>}
+          </div>
+          <div className={`flex-1 border rounded-xl p-3 font-mono text-[11px] overflow-y-auto custom-scrollbar flex flex-col gap-1 shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300' : 'bg-[#050b08] border-emerald-900/30 text-slate-300'}`}>
+            {consoleLogs.map((log, idx) => {
+              let clr = theme === 'dark' ? "text-slate-400" : "text-slate-600";
+              if (log.startsWith('SUCCESS:')) clr = "text-emerald-300 font-medium";
+              if (log.startsWith('CRITICAL:')) clr = "text-emerald-200 font-bold";
+              if (log.startsWith('PROMPT:')) clr = "text-lime-300 italic";
+              return <div key={idx} className={`${clr} break-all whitespace-pre-wrap`}>&gt; {log}</div>;
+            })}
+            <div ref={consoleBottomRef} />
+          </div>
+        </div>
+      </footer>
+
+      {/* CUSTOM COMMIT CHANGE POP-UP MODAL UI (NO WINDOW ALERTS USED) */}
+      {showChangeModal && (
+        <div className="fixed inset-0 bg-[#050b08]/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="w-full max-w-md border p-6 rounded-2xl shadow-2xl transition-all bg-[#08140d] border-emerald-900/30">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-8 w-8 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-500">
+                <Save size={16} />
+              </div>
+              <h3 className={`text-base font-bold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                {activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Collaborative Change'}
+              </h3>
+            </div>
+            
+            <p className={`text-xs mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+              Please enter a brief name or description for this changeset. Teammates will see this description in real-time.
+            </p>
+
+            <form onSubmit={handleConfirmChangeCommit} className="flex flex-col gap-4">
+              <input 
+                type="text" 
+                placeholder="e.g., Fix responsive layout sizing" 
+                value={changeNameInput} 
+                onChange={e => setChangeNameInput(e.target.value)} 
+                required 
+                autoFocus
+                className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${
+                  theme === 'dark' 
+                    ? 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200' 
+                    : 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
+                }`} 
+              />
+
+              <div className="flex gap-2 justify-end text-xs font-bold">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowChangeModal(false);
+                    setPendingFilesToSync(null);
+                  }}
+                  className="px-4 py-2.5 rounded-lg border transition border-emerald-900/30 hover:bg-[#0b1810] text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  disabled={!changeNameInput.trim()}
+                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg transition shadow-md shadow-emerald-950/20"
+                >
+                  Confirm & Push
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN DETAILED SUBMISSION FILE INSPECTOR MODAL UI */}
+      {selectedAdminProjectFiles && (
+        <div className="fixed inset-0 bg-[#050b08]/90 backdrop-blur-md flex items-center justify-center p-6 z-50 animate-fade-in">
+          <div className="w-full h-[90vh] max-w-5xl border rounded-2xl flex flex-col overflow-hidden bg-[#08140d] border-emerald-900/30 shadow-2xl">
+            <header className="h-12 border-b border-emerald-900/30 px-4 flex items-center justify-between bg-[#050b08] shrink-0">
+              <div className="flex items-center gap-2">
+                <Award className="text-rose-400" size={16} />
+                <span className="text-xs font-bold text-slate-200">Admin Live Grading Sandbox</span>
+              </div>
+              <button 
+                onClick={() => setSelectedAdminProjectFiles(null)}
+                className="text-slate-500 hover:text-white transition"
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className="flex-1 flex min-h-0">
+              {/* Submission Files list */}
+              <div className="w-64 border-r border-emerald-900/30 bg-[#050b08] p-3 overflow-y-auto shrink-0 flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Team Files</span>
+                {selectedAdminProjectFiles.map(file => (
+                  <div 
+                    key={file.id || file.name}
+                    onClick={() => {
+                      setAdminActiveFileName(file.name);
+                      setAdminActiveFileContent(file.content);
+                    }}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${
+                      adminActiveFileName === file.name 
+                        ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20' 
+                        : 'text-slate-400 hover:bg-slate-900/60'
+                    }`}
+                  >
+                    <FileCode size={13} />
+                    <span className="truncate">{file.name}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* View inspector panel */}
+              <div className="flex-1 flex flex-col bg-[#050b08] min-w-0">
+                <div className="h-9 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0">
+                  <span className="text-[11px] font-mono text-slate-400">{adminActiveFileName || "Select a file to inspect"}</span>
+                </div>
+                
+                <div className="flex-1 p-4 overflow-auto custom-scrollbar">
+                  <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text selection:bg-rose-500/30 selection:text-white">
+                    {adminActiveFileContent || "No content found inside this file segment."}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}

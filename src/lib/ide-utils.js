@@ -54,3 +54,12 @@ export const formatTime = (secs) => {
   const remainingSecs = secs % 60;
   return `${mins}:${remainingSecs < 10 ? '0' : ''}${remainingSecs}`;
 };
+
+export const slugifyProjectName = (input) =>
+  String(input || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 63);
