@@ -47,7 +47,7 @@ try {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [authBootError, setAuthBootError] = useState('');
   
   // Auth Form State
@@ -421,13 +421,12 @@ export default function App() {
           await signInAnonymously(auth);
         } catch (e) {
           setAuthBootError('Auth service unavailable. Opening sign-in screen.');
+          setAuthLoading(false);
         }
       }
-      setAuthLoading(false);
     };
     initAuth().finally(() => {
       clearTimeout(authTimeout);
-      setAuthLoading(false);
     });
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
