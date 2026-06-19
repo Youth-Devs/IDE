@@ -1510,14 +1510,36 @@ export default function App() {
   const handleSubmitProjectToAdmin = async (projectId) => {
     if (!db || !user) return;
     try {
+      const projectToSubmit = projects.find((proj) => proj.id === projectId) || activeProjectData;
+      const submittedFiles = Array.isArray(projectToSubmit?.files)
+        ? projectToSubmit.files.map((file) => ({ ...file }))
+        : [];
+
       const pRef = doc(db, 'projects', projectId);
       await updateDoc(pRef, { 
         submitted: true,
-        submittedAt: Date.now()
+        submittedAt: Date.now(),
+        submittedBy: user.email || user.uid,
+        submittedFiles
       });
     } catch (err) {
       console.error(err);
       alert("Failed to submit code template files to Admin.");
+    }
+  };
+
+  const openAdminSubmissionFiles = (project) => {
+    const filesToInspect = Array.isArray(project?.submittedFiles) && project.submittedFiles.length > 0
+      ? project.submittedFiles
+      : Array.isArray(project?.files) ? project.files : [];
+
+    setSelectedAdminProjectFiles(filesToInspect);
+    if (filesToInspect.length > 0) {
+      setAdminActiveFileName(filesToInspect[0].name || '');
+      setAdminActiveFileContent(filesToInspect[0].content || '');
+    } else {
+      setAdminActiveFileName('');
+      setAdminActiveFileContent('');
     }
   };
 
@@ -1775,16 +1797,7 @@ export default function App() {
 
                     <div className="flex gap-2">
                       <button 
-                        onClick={() => {
-                          setSelectedAdminProjectFiles(proj.files || []);
-                          if (proj.files && proj.files.length > 0) {
-                            setAdminActiveFileName(proj.files[0].name);
-                            setAdminActiveFileContent(proj.files[0].content);
-                          } else {
-                            setAdminActiveFileName('');
-                            setAdminActiveFileContent('');
-                          }
-                        }}
+                        onClick={() => openAdminSubmissionFiles(proj)}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors"
                       >
                         <FileSearch size={13} />
