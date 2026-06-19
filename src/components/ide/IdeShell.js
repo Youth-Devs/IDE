@@ -61,6 +61,7 @@ export default function App() {
   const [hackathonActive, setHackathonActive] = useState(false);
   const [submissionsEnabled, setSubmissionsEnabled] = useState(false);
   const [globalHackathonProjects, setGlobalHackathonProjects] = useState([]);
+  const [adminSubmissions, setAdminSubmissions] = useState([]);
   const [customDomainMode, setCustomDomainMode] = useState(false);
   
   // Admin File Inspection Modal state
@@ -166,9 +167,9 @@ export default function App() {
 
   const currentActiveFile = files.find(f => f.id === activeFileId) || files[0];
   const activeProjectData = projects.find(p => p.id === currentProjectId);
-  const routeProjectsSource = routeMode === 'admin-project' ? globalHackathonProjects : projects;
+  const routeProjectsSource = routeMode === 'admin-project' ? adminSubmissions : projects;
   const routeProject = (routeMode === 'project' || routeMode === 'admin-project')
-    ? routeProjectsSource.find((p) => slugifyProjectName(p.slug || p.name || p.id) === projectSlugFromRoute)
+    ? routeProjectsSource.find((p) => slugifyProjectName(p.projectSlug || p.slug || p.name || p.id) === projectSlugFromRoute)
     : null;
   const canAccessAdminPanel = isAdmin || String(process.env.NEXT_PUBLIC_FORCE_ADMIN_PANEL).toLowerCase() === 'true' || !db;
 
@@ -562,6 +563,23 @@ export default function App() {
     });
 
     return () => unsubAdminProjects();
+  }, [canAccessAdminPanel]);
+
+  // Admin submission snapshot listener (Dedicated Firestore collection for grading)
+  useEffect(() => {
+    if (!canAccessAdminPanel || !db) return;
+
+    const submissionsRef = collection(db, 'adminSubmissions');
+    const unsubAdminSubmissions = onSnapshot(submissionsRef, (snapshot) => {
+      const submissions = [];
+      snapshot.forEach((docSnap) => {
+        submissions.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      submissions.sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
+      setAdminSubmissions(submissions);
+    });
+
+    return () => unsubAdminSubmissions();
   }, [canAccessAdminPanel]);
 
   // Fetch GitHub User parameters when token is parsed
@@ -1530,14 +1548,30 @@ export default function App() {
       const submittedFiles = Array.isArray(projectToSubmit?.files)
         ? projectToSubmit.files.map((file) => ({ ...file }))
         : [];
+      const projectSlug = slugifyProjectName(projectToSubmit?.slug || projectToSubmit?.name || projectToSubmit?.id || projectId);
+      const projectName = projectToSubmit?.name || 'Untitled Project';
+      const submittedAt = Date.now();
+      const submittedBy = user.email || user.uid;
 
       const pRef = doc(db, 'projects', projectId);
       await updateDoc(pRef, { 
         submitted: true,
-        submittedAt: Date.now(),
-        submittedBy: user.email || user.uid,
+        submittedAt,
+        submittedBy,
         submittedFiles
       });
+
+      await setDoc(doc(db, 'adminSubmissions', projectId), {
+        projectId,
+        projectSlug,
+        projectName,
+        memberEmails: Array.isArray(projectToSubmit?.memberEmails) ? projectToSubmit.memberEmails : [],
+        memberUids: Array.isArray(projectToSubmit?.memberUids) ? projectToSubmit.memberUids : [],
+        submitted: true,
+        submittedAt,
+        submittedBy,
+        submittedFiles
+      }, { merge: true });
     } catch (err) {
       console.error(err);
       alert("Failed to submit code template files to Admin.");
@@ -1792,7 +1826,7 @@ export default function App() {
                   Domain mode: {customDomainMode ? 'Custom youthdevs.me aliases' : 'Standard vercel.app aliases'}
                 </span>
                 <span className={`px-2 py-1 rounded-full border ${theme === 'dark' ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-emerald-700 border-emerald-200'}`}>
-                  Submissions: {globalHackathonProjects.length}
+                  Submissions: {adminSubmissions.length}
                 </span>
               </div>
 
@@ -1867,22 +1901,22 @@ export default function App() {
 
             <div className="flex justify-between items-center mb-4">
               <h3 className={`text-xs font-bold uppercase tracking-widest flex items-center gap-1 ${theme === 'dark' ? 'text-slate-500' : 'text-emerald-700'}`}>
-                <Award size={14} /> Registered Hackathon Submissions ({globalHackathonProjects.length})
+                <Award size={14} /> Registered Hackathon Submissions ({adminSubmissions.length})
               </h3>
             </div>
 
-            {globalHackathonProjects.length === 0 ? (
+            {adminSubmissions.length === 0 ? (
               <div className={`text-center py-12 border border-dashed rounded-xl text-xs font-mono ${theme === 'dark' ? 'border-slate-800 text-slate-500' : 'border-emerald-200 text-emerald-700'}`}>
                 No active student teams have flagged their repositories as hackathon submissions yet.
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                {globalHackathonProjects.map(proj => (
+                {adminSubmissions.map(proj => (
                   <div key={proj.id} className={`p-4 border rounded-xl flex items-center justify-between ${theme === 'dark' ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-emerald-200'}`}>
                     <div>
                       <div className="flex items-center gap-2">
                         <Folder size={15} className="text-emerald-500" />
-                        <span className={`text-sm font-bold ${theme === 'dark' ? 'text-white' : 'text-emerald-950'}`}>{proj.name}</span>
+                        <span className={`text-sm font-bold ${theme === 'dark' ? 'text-white' : 'text-emerald-950'}`}>{proj.projectName || proj.name}</span>
                         {proj.submitted ? (
                           <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">Submitted</span>
                         ) : (
@@ -1895,8 +1929,15 @@ export default function App() {
                     </div>
 
                     <div className="flex gap-2">
-                      <button 
-                        onClick={() => openAdminSubmissionFiles(proj)}
+                      <button
+                        onClick={() => {
+                          const nextSlug = slugifyProjectName(proj.projectSlug || proj.slug || proj.projectName || proj.name || proj.id || '');
+                          if (!nextSlug) return;
+                          setSelectedAdminProjectFiles(null);
+                          setAdminActiveFileName('');
+                          setAdminActiveFileContent('');
+                          router.push(`/admin/${nextSlug}`);
+                        }}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors"
                       >
                         <FileSearch size={13} />

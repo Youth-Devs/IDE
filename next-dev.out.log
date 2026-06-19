@@ -29,18 +29,17 @@
  ✓ Compiled in 1452ms (231 modules)
  ✓ Compiled in 2.4s (231 modules)
  ✓ Compiled in 2.3s (231 modules)
-icon.ico 200 in 214ms
- GET /favicon.ico 200 in 145ms
- GET /favicon.ico 200 in 117ms
- GET /favicon.ico 200 in 255ms
- GET /favicon.ico 200 in 120ms
- GET /favicon.ico 200 in 314ms
- GET /favicon.ico 200 in 295ms
- GET /favicon.ico 200 in 215ms
- GET /favicon.ico 200 in 109ms
- GET /favicon.ico 200 in 161ms
- GET /favicon.ico 200 in 114ms
- GET /favicon.ico 200 in 185ms
+ ✓ Compiled in 12.2s (231 modules)
+ ✓ Compiled in 6.7s (231 modules)
+ ✓ Compiled in 5.6s (231 modules)
+ ✓ Compiled in 1215ms (231 modules)
+ ✓ Compiled in 4s (231 modules)
+ ✓ Compiled in 3.1s (231 modules)
+ ✓ Compiled in 21.9s (231 modules)
+ ✓ Compiled in 4.2s (231 modules)
+ ✓ Compiled in 5s (231 modules)
+ ✓ Compiled in 3.5s (231 modules)
+ms
  GET /favicon.ico 200 in 152ms
  GET /favicon.ico 200 in 226ms
  GET /favicon.ico 200 in 380ms
@@ -148,3 +147,12 @@ icon.ico 200 in 214ms
  GET /_next/static/chunks/main-app.js?v=1781907714811 404 in 149ms
  GET /_next/static/chunks/app-pages-internals.js 404 in 136ms
  GET /favicon.ico 500 in 946ms
+ ✓ Compiled in 23.7s (927 modules)
+ ✓ Compiled in 12.2s (927 modules)
+ ✓ Compiled in 9.9s (927 modules)
+ ✓ Compiled in 2.9s (927 modules)
+ ✓ Compiled in 5.8s (927 modules)
+ ✓ Compiled in 6.5s (927 modules)
+ ✓ Compiled in 28.4s (927 modules)
+ ✓ Compiled in 16.9s (927 modules)
+ ✓ Compiled in 7.2s (927 modules)
