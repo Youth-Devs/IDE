@@ -1,7 +1,7 @@
 'use client';
 
-import IdeShell from '../../../components/ide/IdeShell';
+import WorkspaceShell from '../../workspace/_components/WorkspaceShell';
 
 export default function AdminProjectPage() {
-  return <IdeShell />;
+  return <WorkspaceShell />;
 }
