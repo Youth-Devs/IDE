@@ -1,5 +1,7 @@
-import { redirect } from 'next/navigation';
+'use client';
+
+import IdeShell from '../../components/ide/IdeShell';
 
 export default function DashboardPage() {
-  redirect('/workspace');
+  return <IdeShell />;
 }
