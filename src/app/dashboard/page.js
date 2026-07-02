@@ -1,5 +1,7 @@
-import { redirect } from 'next/navigation';
+'use client';
+
+import WorkspaceShell from '../workspace/_components/WorkspaceShell';
 
 export default function DashboardPage() {
-  redirect('/workspace');
+  return <WorkspaceShell />;
 }

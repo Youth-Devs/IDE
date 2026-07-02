@@ -88,7 +88,12 @@ export default function LoginPage() {
     try {
       const provider = new GithubAuthProvider();
       provider.addScope('repo');
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      const credential = GithubAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+      if (token) {
+        localStorage.setItem('github-token', token);
+      }
       router.replace(WORKSPACE_PATH);
     } catch (error) {
       setAuthError(error.message);

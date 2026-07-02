@@ -1,4 +1,4 @@
-export const WORKSPACE_PATH = '/workspace';
+export const WORKSPACE_PATH = '/dashboard';
 export const LOGIN_PATH = '/login';
 export const ADMIN_PATH = '/admin';
 
@@ -8,6 +8,7 @@ export function getWorkspaceRouteState(pathname) {
   const routeMode =
     routePath === '' ? 'root' :
     routePath === 'workspace' ? 'workspace' :
+    routePath === 'dashboard' ? 'workspace' :
     routePath === 'login' ? 'login' :
     routePath === 'admin' ? 'admin' :
     routeSegments[0] === 'admin' && routeSegments[1] ? 'admin-project' :

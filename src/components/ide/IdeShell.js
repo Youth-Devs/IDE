@@ -19,7 +19,22 @@ import {
   onAuthStateChanged,
   signInWithCustomToken,
   signInAnonymously,
+  GithubAuthProvider,
+  signInWithPopup,
 } from '../../app/workspace/_utils/firebase';
+
+import {
+  collection,
+  doc,
+  query,
+  where,
+  onSnapshot,
+  addDoc,
+  updateDoc,
+  setDoc,
+  getDocs,
+  getCountFromServer,
+} from 'firebase/firestore';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -367,6 +382,23 @@ export default function App() {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
     localStorage.setItem('ide-theme', nextTheme);
+  };
+
+  const handleGithubSignIn = async () => {
+    if (!auth) return;
+    try {
+      const provider = new GithubAuthProvider();
+      provider.addScope('repo');
+      const result = await signInWithPopup(auth, provider);
+      const credential = GithubAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+      if (token) {
+        localStorage.setItem('github-token', token);
+        setGithubToken(token);
+      }
+    } catch (error) {
+      console.error('Failed to link GitHub:', error);
+    }
   };
 
   // Reset synced file caches when leaving or switching projects
