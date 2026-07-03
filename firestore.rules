@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isProjectMember(projectId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/projects/$(projectId)) &&
+        get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids != null &&
+        request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if isAdmin();
+      allow list: if isAuthenticated();
+    }
+
+    match /system/{documentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /projects/{projectId} {
+      allow create: if isAuthenticated();
+
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        (resource.data.memberUids != null && request.auth.uid in resource.data.memberUids) ||
+        resource.data.isHackathonProject == true
+      );
+
+      allow update, delete: if isAdmin() || isProjectMember(projectId);
+    }
+
+    match /adminSubmissions/{projectId} {
+      allow read: if isAdmin() || isProjectMember(projectId);
+      allow create, update: if isProjectMember(projectId) && request.resource.data.projectId == projectId;
+      allow delete: if isAdmin();
+    }
+  }
+}

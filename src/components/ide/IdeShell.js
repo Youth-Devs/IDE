@@ -3,58 +3,31 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch, ArrowLeft } from 'lucide-react';
-import AuthScreen from './AuthScreen';
-import WorkspaceHeader from './WorkspaceHeader';
+import { addDoc, arrayUnion, collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import WorkspaceHeader from '../../app/workspace/_components/WorkspaceHeader';
 import {
   buildVercelFilesPayload,
   decodeBase64Utf8,
   filesAreIdentical,
   slugifyProjectName,
 } from '../../lib/ide-utils';
+import { getWorkspaceRouteState, WORKSPACE_PATH, LOGIN_PATH } from '../../app/workspace/_utils/routes';
 
-// Firebase Connectors
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, GithubAuthProvider, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, getDocs, query, where, updateDoc, setDoc, onSnapshot, serverTimestamp, getCountFromServer, arrayUnion } from 'firebase/firestore';
-
-// Safe environment variable initialization with mock fallbacks to prevent runtime compilation crashes
-const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-    measurementId: process.env.NEXT_PUBLIC_MEASUREMENT_ID
-};
-
-let app = null;
-let auth = null;
-let db = null;
-let googleProvider = null;
-
-// Gracefully instantiate Firebase services so missing environment variables do not block the page load
-try {
-  if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "placeholder-api-key-for-local-vibe") {
-    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-    auth = getAuth(app);
-    db = getFirestore(app);
-    googleProvider = new GoogleAuthProvider();
-  }
-} catch (error) {
-  console.warn("Firebase initialization skipped or failed. Falling back to local offline mode.", error);
-}
+import {
+  auth,
+  db,
+  GithubAuthProvider,
+  signOut,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithCustomToken,
+  signInAnonymously,
+} from '../../app/workspace/_utils/firebase';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authBootError, setAuthBootError] = useState('');
-  
-  // Auth Form State
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [authError, setAuthError] = useState('');
 
   // Admin and Hackathon Configuration States
   const [isAdmin, setIsAdmin] = useState(false);
@@ -74,11 +47,11 @@ export default function App() {
   const [githubUser, setGithubUser] = useState(null);
   const [useGithubForNewProject, setUseGithubForNewProject] = useState(false);
 
-  // Dashboard vs IDE View state
+  // Workspace vs IDE View state
   const [currentProjectId, setCurrentProjectIdState] = useState(null); 
   const [projects, setProjects] = useState([]);
   const [newProjectName, setNewProjectName] = useState('');
-  const [dashboardError, setDashboardError] = useState(''); 
+  const [workspaceError, setWorkspaceError] = useState(''); 
   
   // PROJECT CREATION LOADING STATUS
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -150,20 +123,13 @@ export default function App() {
   const consoleBottomRef = useRef(null);
   const pathname = usePathname();
   const router = useRouter();
-  const routePath = decodeURIComponent((pathname || '/').replace(/^\/+/, ''));
-  const routeSegments = routePath.split('/').filter(Boolean);
-  const routeMode =
-    routePath === '' ? 'root' :
-    routePath === 'login' ? 'login' :
-    routePath === 'dashboard' ? 'dashboard' :
-    routePath === 'admin' ? 'admin' :
-    routeSegments[0] === 'admin' && routeSegments[1] ? 'admin-project' :
-    'project';
-  const isAdminRoute = routeMode === 'admin' || routeMode === 'admin-project';
-  const projectSlugFromRoute =
-    routeMode === 'project' ? (routeSegments[0] || '') :
-    routeMode === 'admin-project' ? (routeSegments[1] || '') :
-    '';
+  const {
+    routePath,
+    routeSegments,
+    routeMode,
+    isAdminRoute,
+    projectSlugFromRoute,
+  } = getWorkspaceRouteState(pathname);
 
   const currentActiveFile = files.find(f => f.id === activeFileId) || files[0];
   const activeProjectData = projects.find(p => p.id === currentProjectId);
@@ -206,7 +172,23 @@ export default function App() {
     setPreviewHtml('');
   }, [currentProjectId]);
 
-  // Custom setter that persists to sessionStorage so reload doesn't boot them to the dashboard
+  const handleGithubSignIn = async () => {
+    setAuthBootError('');
+    if (!auth) {
+      setAuthBootError('Authentication service is offline.');
+      return;
+    }
+
+    try {
+      const provider = new GithubAuthProvider();
+      provider.addScope('repo');
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      setAuthBootError(error.message.replace('Firebase: ', ''));
+    }
+  };
+
+  // Custom setter that persists to sessionStorage so reload doesn't boot them to the workspace
   const setCurrentProjectId = (id) => {
     setCurrentProjectIdState(id);
     if (id) {
@@ -218,14 +200,14 @@ export default function App() {
       }
     } else {
       sessionStorage.removeItem('current-project-id');
-      router.push('/dashboard');
+      router.push(WORKSPACE_PATH);
     }
   };
 
   useEffect(() => {
     if (routeMode === 'root') {
       if (!authLoading) {
-        router.replace(user ? '/dashboard' : '/login');
+        router.replace(WORKSPACE_PATH);
       }
       return;
     }
@@ -236,18 +218,18 @@ export default function App() {
         sessionStorage.removeItem('current-project-id');
       }
       if (user && !authLoading) {
-        router.replace('/dashboard');
+        router.replace(WORKSPACE_PATH);
       }
       return;
     }
 
-    if (routeMode === 'dashboard') {
+    if (routeMode === 'workspace') {
       if (currentProjectId) {
         setCurrentProjectIdState(null);
         sessionStorage.removeItem('current-project-id');
       }
       if (!user && !authLoading) {
-        router.replace('/login');
+        router.replace(LOGIN_PATH);
       }
       return;
     }
@@ -276,13 +258,13 @@ export default function App() {
 
     if (routeMode === 'project') {
       if (!user && !authLoading) {
-        router.replace('/login');
+        router.replace(LOGIN_PATH);
         return;
       }
       if (routeProject && routeProject.id !== currentProjectId) {
         setCurrentProjectIdState(routeProject.id);
       } else if (!routeProject && projects.length > 0 && !currentProjectId) {
-        router.replace('/dashboard');
+        router.replace(WORKSPACE_PATH);
       }
     }
   }, [routeMode, routeProject?.id, user, authLoading, currentProjectId, router]);
@@ -421,6 +403,7 @@ export default function App() {
       return;
     }
 
+    const shouldAutoSignIn = routeMode !== 'login';
     const authTimeout = setTimeout(() => {
       setAuthBootError('Auth bootstrap timed out. Opening sign-in screen.');
       setAuthLoading(false);
@@ -431,9 +414,11 @@ export default function App() {
         try {
           await signInWithCustomToken(auth, __initial_auth_token);
         } catch (e) {
-          await signInAnonymously(auth);
+          if (shouldAutoSignIn) {
+            await signInAnonymously(auth);
+          }
         }
-      } else {
+      } else if (shouldAutoSignIn) {
         try {
           await signInAnonymously(auth);
         } catch (e) {
@@ -885,65 +870,11 @@ export default function App() {
     };
   }, [leftWidth]);
 
-  // --- AUTH OPERATIONS ---
-  const handleAuthSubmit = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    if (!auth) {
-      setAuthError('Authentication Service is offline. Please supply Firebase credentials.');
-      return;
-    }
-    try {
-      if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, email, password);
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-      }
-    } catch (err) {
-      setAuthError(err.message.replace('Firebase: ', ''));
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    setAuthError('');
-    if (!auth) {
-      setAuthError('Authentication Service is offline.');
-      return;
-    }
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      setAuthError(err.message);
-    }
-  };
-
-  // GITHUB DIRECT WORKSPACE OAUTH SIGN-IN
-  const handleGithubSignIn = async () => {
-    setAuthError('');
-    if (!auth) {
-      setAuthError('Authentication Service is offline.');
-      return;
-    }
-    try {
-      const provider = new GithubAuthProvider();
-      provider.addScope('repo'); // Requests write credentials for collaborative code storage
-      const result = await signInWithPopup(auth, provider);
-      const credential = GithubAuthProvider.credentialFromResult(result);
-      const token = credential?.accessToken;
-      if (token) {
-        localStorage.setItem('github-token', token);
-        setGithubToken(token);
-      }
-    } catch (err) {
-      setAuthError(err.message);
-    }
-  };
-
   // --- PROJECT SETUP FOR COLLABORATIVE TEAMS AND GITHUB STORAGE REPOS ---
   const handleCreateProject = async (e) => {
     e.preventDefault();
     if (!newProjectName.trim() || !user) return;
-    setDashboardError(''); 
+    setWorkspaceError(''); 
     
     // Offline creation guard
     if (!db) {
@@ -1087,7 +1018,7 @@ export default function App() {
       router.push(`/${newProjectSlug || cleanedRepoName || 'project'}`);
     } catch (err) {
       console.error(err);
-      setDashboardError(err.message || 'Permission denied. Make sure your Firestore rules match your project schema!');
+      setWorkspaceError(err.message || 'Permission denied. Make sure your Firestore rules match your project schema!');
     } finally {
       setIsCreatingProject(false); // Clear Loading status overlay
       setProjectStatusMessage('');
@@ -1520,7 +1451,7 @@ export default function App() {
   // --- HACKATHON ASSIGNMENT FLOW FOR USERS (LIMIT TO 1 ACTIVE ASSIGNED PROJECT) ---
   const handleToggleDeemHackathon = async (projectId, currentStatus) => {
     if (!db || !user) return;
-    setDashboardError('');
+    setWorkspaceError('');
 
     try {
       const batchPromises = projects.map(async (proj) => {
@@ -1536,7 +1467,7 @@ export default function App() {
       await Promise.all(batchPromises);
     } catch (err) {
       console.error(err);
-      setDashboardError("Failed to update Hackathon configuration status.");
+      setWorkspaceError("Failed to update Hackathon configuration status.");
     }
   };
 
@@ -1630,23 +1561,11 @@ export default function App() {
     );
   }
 
-  // --- RENDER 1: SIGN IN / SIGN UP SCREEN PANEL ---
   if (!user) {
     return (
-      <AuthScreen
-        theme={theme}
-        isSignUp={isSignUp}
-        email={email}
-        password={password}
-        authError={authError}
-        onToggleTheme={toggleTheme}
-        onAuthSubmit={handleAuthSubmit}
-        onGithubSignIn={handleGithubSignIn}
-        onGoogleSignIn={handleGoogleSignIn}
-        onToggleAuthMode={() => setIsSignUp(!isSignUp)}
-        onEmailChange={setEmail}
-        onPasswordChange={setPassword}
-      />
+      <div className={`h-screen w-screen flex items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#050b08] text-emerald-300'}`}>
+        Opening sign-in screen...
+      </div>
     );
   }
 
@@ -1765,7 +1684,7 @@ export default function App() {
             {/* ADMIN ACCESS CONTEXT SWITCHER TRIGGER BUTTON */}
             {canAccessAdminPanel && (
               <button 
-                onClick={() => router.push(isAdminRoute ? '/dashboard' : '/admin')} 
+                onClick={() => router.push(isAdminRoute ? WORKSPACE_PATH : '/admin')} 
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold border hover:scale-105 transition-all ${
                   isAdminRoute 
                     ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' 
@@ -2013,10 +1932,10 @@ export default function App() {
                 )}
               </form>
 
-              {/* Dashboard Error Panel displaying Firestore Permission issues beautifully */}
-              {dashboardError && (
+              {/* Workspace Error Panel displaying Firestore Permission issues beautifully */}
+              {workspaceError && (
                 <p className="text-xs text-rose-400 font-mono mt-3 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-lg animate-shake">
-                  ⚠️ {dashboardError}
+                  ⚠️ {workspaceError}
                 </p>
               )}
             </div>
@@ -2038,7 +1957,7 @@ export default function App() {
                       setActiveFileId('');
                       setInviteStatus('');
                       if (nextSlug) {
-                        router.push(`/admin/${nextSlug}`);
+                        router.push(`/${nextSlug}`);
                       }
                     }}
                     className={`p-4 border rounded-xl cursor-pointer transition-all group relative ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-emerald-500/40 text-slate-300' : 'bg-white border-emerald-200 hover:border-emerald-500/45 text-slate-700 shadow-sm hover:shadow'}`}
