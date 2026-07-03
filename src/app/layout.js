@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "YouthDevs Vibe IDE",
-  description: "Learn to build websites with AI instantly",
+  title: "YouthDevs IDE",
+  description: "A hackathon-ready workspace for building with your team",
   icons: {
     icon: '/icon.svg',
   },

@@ -110,7 +110,7 @@ export default function App() {
   const [promptInput, setPromptInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [consoleLogs, setConsoleLogs] = useState([
-    'SYSTEM: YouthDevs Workspace Real-Time Team Layer Online.'
+    'Ready. Your YouthDevs workspace is online.'
   ]);
   const [previewHtml, setPreviewHtml] = useState('');
 
@@ -1387,7 +1387,7 @@ export default function App() {
     return intervalId;
   };
 
-  // --- AGENT VIBE PIPELINE RUNNER ---
+  // --- TASK PIPELINE RUNNER ---
   const handleAgenticVibeSubmit = async (e) => {
     e.preventDefault();
     if (!promptInput.trim() || isAiLoading || !currentProjectId) return;
@@ -1398,7 +1398,7 @@ export default function App() {
     }
 
     setIsAiLoading(true);
-    setConsoleLogs([`PROMPT: "${promptInput}"`, 'SYSTEM: Initializing agent ecosystem pipeline context...']);
+    setConsoleLogs([`TASK: "${promptInput}"`, 'SYSTEM: Preparing workspace context...']);
 
     const keepStreaming = { current: true };
     const streamId = triggerMatrixTerminalStream(keepStreaming);
@@ -1451,7 +1451,7 @@ export default function App() {
         }
 
         setLastModelUsed(targetModel === 'gemini-3.5-flash' ? 'Gemini 3.5 Flash' : 'Gemini 3.1 Flash-Lite');
-        setConsoleLogs(prev => [...prev, ...actionLogs.map(l => `SUCCESS: ${l}`), 'COMPLETED: AI patch generation complete. Preparing team change commit...']);
+        setConsoleLogs(prev => [...prev, ...actionLogs.map(l => `SUCCESS: ${l}`), 'COMPLETED: Changes applied. Preparing team update commit...']);
         setPromptInput('');
 
         // Token metric tracking updates
@@ -1468,7 +1468,7 @@ export default function App() {
           }
         }
 
-        // Trigger pop up to name and sync the AI vibe additions
+        // Trigger pop up to name and sync the workspace changes
         triggerPushCommitModal(updatedFilesList);
       } else {
         setConsoleLogs(prev => [...prev, `CRITICAL: Compilation failed. ${data.error || 'Check server configuration structure.'}`]);
@@ -1589,7 +1589,7 @@ export default function App() {
     return (
       <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#050b08] text-emerald-300'}`}>
         <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent animate-spin rounded-full"></div>
-        CONNECTING TO YOUTHDEVS KERNEL...
+        Loading YouthDevs IDE...
         {authBootError && <span className="text-[11px] text-slate-500 px-4 text-center max-w-md">{authBootError}</span>}
       </div>
     );
@@ -1958,8 +1958,8 @@ export default function App() {
             )}
 
             <div className={`border p-6 rounded-2xl mb-8 transition-colors ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 to-slate-900 border-slate-800/80' : 'bg-gradient-to-r from-emerald-50/70 to-white border-emerald-200'}`}>
-              <h2 className={`text-xl font-black ${theme === 'dark' ? 'text-white' : 'text-emerald-950'}`}>Welcome Back to Hackathon Core</h2>
-              <p className={`text-xs mt-1 max-w-lg ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Build collaborative multi-file web applications natively with your team of up to 3 members. Switch your workspace parameters to GitHub to save, track, and deploy code directly inside GitHub repos!</p>
+              <h2 className={`text-xl font-black ${theme === 'dark' ? 'text-white' : 'text-emerald-950'}`}>Welcome Back to YouthDevs IDE</h2>
+              <p className={`text-xs mt-1 max-w-lg ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Build collaborative multi-file web apps with your team of up to 3 members. Connect GitHub if you want to sync a project repo while you work.</p>
               
               <form onSubmit={handleCreateProject} className="mt-4 flex flex-col gap-3 max-w-md">
                 <div className="flex gap-2">
@@ -2322,11 +2322,11 @@ export default function App() {
         <div className="flex-1 flex flex-col min-w-0 h-full">
           <div className={`flex items-center gap-1.5 mb-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
             <Sparkles size={13} className={isAiLoading ? "animate-spin text-emerald-300" : ""} />
-            <span className="text-[11px] font-bold uppercase tracking-wider">Prompt Terminal</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider">Task Terminal</span>
           </div>
           <form onSubmit={handleAgenticVibeSubmit} className={`flex-1 flex items-stretch gap-2 border rounded-xl p-2 transition-all ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60' : 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60'}`}>
-            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Supercharge mode re-calibrating..." : "Instruct the file agent ecosystem to execute actions..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-200 placeholder-slate-500'}`} />
-            <button type="submit" disabled={isAiLoading || !promptInput.trim()} className="self-end flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition shrink-0 shadow-lg shadow-emerald-950/20">Vibe <ChevronRight size={12} /></button>
+            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Boost mode cooling down..." : "Describe the change you want made..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-200 placeholder-slate-500'}`} />
+            <button type="submit" disabled={isAiLoading || !promptInput.trim()} className="self-end flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition shrink-0 shadow-lg shadow-emerald-950/20">Run <ChevronRight size={12} /></button>
           </form>
         </div>
 

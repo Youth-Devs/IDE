@@ -31,9 +31,9 @@ export default function AuthScreen({
         </div>
 
         <h2 className={`text-xl font-bold tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-          {isSignUp ? 'Create Workspace Account' : 'Sign In to Vibe Workspace'}
+          {isSignUp ? 'Create YouthDevs Account' : 'Sign In to YouthDevs IDE'}
         </h2>
-        <p className={`text-xs mt-1 mb-4 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Enter credentials or connect using your provider channels.</p>
+        <p className={`text-xs mt-1 mb-4 ${theme === 'dark' ? 'text-slate-500' : 'text-slate-600'}`}>Use your account to open the hackathon workspace and team projects.</p>
 
         <form onSubmit={onAuthSubmit} className="flex flex-col gap-3">
           <input
@@ -46,7 +46,7 @@ export default function AuthScreen({
           />
           <input
             type="password"
-            placeholder="Account Security Key"
+            placeholder="Password"
             value={password}
             onChange={(e) => onPasswordChange(e.target.value)}
             required

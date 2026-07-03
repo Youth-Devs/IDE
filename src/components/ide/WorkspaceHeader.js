@@ -101,7 +101,7 @@ export default function WorkspaceHeader({
 
         <div className={`flex items-center gap-3 border px-3 py-1 rounded-xl transition-colors shrink-0 ${theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30' : 'bg-emerald-50 border-emerald-200'}`}>
           <div className="flex flex-col text-right">
-            <span className="text-[10px] font-bold uppercase tracking-tight">Supercharge</span>
+            <span className="text-[10px] font-bold uppercase tracking-tight">Boost</span>
               <span className={`text-[9px] font-mono ${theme === 'dark' ? 'text-slate-500' : 'text-emerald-700'}`}>
                 {cooldownEndTime ? `Lock: ${formatTime(secondsLeft)}` : `Left: ${10 - superchargeUses}/10`}
               </span>
