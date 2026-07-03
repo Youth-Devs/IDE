@@ -41,6 +41,7 @@ export default function App() {
   const [selectedAdminProjectFiles, setSelectedAdminProjectFiles] = useState(null);
   const [adminActiveFileContent, setAdminActiveFileContent] = useState('');
   const [adminActiveFileName, setAdminActiveFileName] = useState('');
+  const [adminViewTab, setAdminViewTab] = useState('code');
 
   // GitHub Integration States
   const [githubToken, setGithubToken] = useState(null);
@@ -235,6 +236,10 @@ export default function App() {
     }
 
     if (routeMode === 'admin') {
+      if (!isAdmin && !authLoading) {
+        router.replace(WORKSPACE_PATH);
+        return;
+      }
       if (currentProjectId) {
         setCurrentProjectIdState(null);
         sessionStorage.removeItem('current-project-id');
@@ -246,6 +251,10 @@ export default function App() {
     }
 
     if (routeMode === 'admin-project') {
+      if (!isAdmin && !authLoading) {
+        router.replace(WORKSPACE_PATH);
+        return;
+      }
       if (!user && !authLoading) {
         router.replace('/login');
         return;
@@ -1278,6 +1287,31 @@ export default function App() {
     return bundledHtml;
   };
 
+  const getBundledPreviewCodeFromFiles = (sourceFiles) => {
+    const filesToBundle = Array.isArray(sourceFiles) ? sourceFiles : [];
+    const indexFile = filesToBundle.find(f => f.name === 'index.html') || filesToBundle[0];
+    if (!indexFile) return '';
+
+    let bundledHtml = indexFile.content || '';
+
+    filesToBundle.forEach((file) => {
+      if (file.language === 'css') {
+        const cssMatcher = new RegExp(`<link[^>]*href=["']\\.?/?${file.name}["'][^>]*>`, 'g');
+        bundledHtml = cssMatcher.test(bundledHtml)
+          ? bundledHtml.replace(cssMatcher, `<style>\n${file.content || ''}\n</style>`)
+          : bundledHtml.replace('</head>', `<style>\n${file.content || ''}\n</style>\n</head>`);
+      }
+      if (file.language === 'javascript') {
+        const jsMatcher = new RegExp(`<script[^>]*src=["']\\.?/?${file.name}["'][^>]*>\\s*</script>`, 'g');
+        bundledHtml = jsMatcher.test(bundledHtml)
+          ? bundledHtml.replace(jsMatcher, `<script>\n${file.content || ''}\n</script>`)
+          : bundledHtml.replace('</body>', `<script>\n${file.content || ''}\n</script>\n</body>`);
+      }
+    });
+
+    return bundledHtml;
+  };
+
   const refreshSandboxPreview = () => {
     setPreviewHtml(getBundledPreviewCode());
   };
@@ -1585,6 +1619,7 @@ export default function App() {
     const adminSubmittedAt = adminSubmissionProjectData?.submittedAt
       ? new Date(adminSubmissionProjectData.submittedAt).toLocaleString()
       : '';
+    const adminPreviewHtml = getBundledPreviewCodeFromFiles(adminSubmissionFiles);
 
     if (!adminSubmissionProjectData) {
       return (
@@ -1644,16 +1679,43 @@ export default function App() {
           </section>
 
           <section className="flex-1 min-w-0 flex flex-col bg-[#050b08]">
-            <div className="h-12 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0">
-              <span className="text-[11px] font-mono text-slate-400">{adminActiveFileName || 'Select a file to inspect'}</span>
+            <div className="h-12 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0 gap-3">
+              <div className="flex items-center gap-1 rounded-lg border border-emerald-900/30 bg-[#050b08] p-1">
+                <button
+                  type="button"
+                  onClick={() => setAdminViewTab('code')}
+                  className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition ${adminViewTab === 'code' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                >
+                  Code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminViewTab('preview')}
+                  className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition ${adminViewTab === 'preview' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                >
+                  Preview
+                </button>
+              </div>
               <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Read Only</span>
             </div>
 
-            <div className="flex-1 p-4 overflow-auto custom-scrollbar">
-              <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text selection:bg-rose-500/30 selection:text-white">
-                {adminActiveFileContent || 'No content found inside this file segment.'}
-              </pre>
-            </div>
+            {adminViewTab === 'code' ? (
+              <div className="flex-1 p-4 overflow-auto custom-scrollbar">
+                <div className="text-[11px] font-mono text-slate-400 mb-3">{adminActiveFileName || 'Select a file to inspect'}</div>
+                <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text selection:bg-rose-500/30 selection:text-white">
+                  {adminActiveFileContent || 'No content found inside this file segment.'}
+                </pre>
+              </div>
+            ) : (
+              <div className="flex-1 w-full bg-[#050b08] relative">
+                <iframe
+                  title="Admin Submission Preview"
+                  srcDoc={adminPreviewHtml || previewPlaceholderHtml}
+                  sandbox="allow-scripts"
+                  className="absolute inset-0 w-full h-full border-none"
+                />
+              </div>
+            )}
           </section>
         </main>
       </div>

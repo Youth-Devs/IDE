@@ -3,6 +3,9 @@ import "./globals.css";
 export const metadata = {
   title: "YouthDevs Vibe IDE",
   description: "Learn to build websites with AI instantly",
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }) {
