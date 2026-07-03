@@ -1,6 +1,7 @@
 'use client';
 
 import { Github, LogIn, Moon, Sun } from 'lucide-react';
+import { FaGoogle } from "react-icons/fa";
 
 export default function AuthScreen({
   theme,
@@ -67,11 +68,11 @@ export default function AuthScreen({
 
         <div className="flex flex-col gap-2">
           <button onClick={onGithubSignIn} className={`w-full border text-xs font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30 text-slate-100 hover:bg-[#0b1810]' : 'bg-emerald-50 border-emerald-200 text-emerald-900 hover:bg-emerald-100'}`}>
-            <Github size={14} className={theme === 'dark' ? 'fill-slate-100' : 'fill-emerald-900'} /> Continue with GitHub
+            <FaGoogle size={14} className={theme === 'dark' ? 'fill-slate-100' : 'fill-emerald-900'} /> Continue with Google
           </button>
 
-          <button onClick={onGoogleSignIn} className={`w-full border text-xs font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300 hover:bg-[#0b1810]' : 'bg-white border-emerald-200 text-slate-700 hover:bg-emerald-50'}`}>
-            <LogIn size={14} /> Continue with Google
+          <button onClick={onGithubSignIn} className={`w-full border text-xs font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 transition ${theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30 text-slate-100 hover:bg-[#0b1810]' : 'bg-emerald-50 border-emerald-200 text-emerald-900 hover:bg-emerald-100'}`}>
+            <Github size={14} className={theme === 'dark' ? 'fill-slate-100' : 'fill-emerald-900'} /> Continue with GitHub
           </button>
         </div>
 
