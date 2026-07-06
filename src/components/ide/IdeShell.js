@@ -1168,68 +1168,71 @@ export default function App() {
     setShowChangeModal(true);
   };
 
-  const handleConfirmChangeCommit = async (e) => {
-    e.preventDefault();
-    if (!changeNameInput.trim() || !pendingFilesToSync || !currentProjectId) return;
+  const syncFilesToWorkspace = async (updatedFiles, commitMessage, { skipGitHub = false } = {}) => {
+    if (!currentProjectId) return;
 
     // Offline modification fallback handler
     if (!db) {
-      setFiles(pendingFilesToSync);
+      setFiles(updatedFiles);
       const updatedProjects = projects.map(p => p.id === currentProjectId ? {
         ...p,
-        files: pendingFilesToSync,
+        files: updatedFiles,
         lastChange: {
           by: 'offline-developer',
-          message: changeNameInput.trim(),
+          message: commitMessage,
           timestamp: Date.now()
         }
       } : p);
       setProjects(updatedProjects);
-      setShowChangeModal(false);
-      setPendingFilesToSync(null);
-      setConsoleLogs(prev => [...prev, `SUCCESS: Simulated sync completed - "${changeNameInput.trim()}"`]);
+      setConsoleLogs(prev => [...prev, `SUCCESS: Simulated sync completed - "${commitMessage}"`]);
       return;
     }
 
     try {
       const projectRef = doc(db, 'projects', currentProjectId);
-      const userHandle = user.email ? user.email.split('@')[0] : 'anonymous';
+      const userHandle = user?.email ? user.email.split('@')[0] : 'anonymous';
 
       // IF WORKSPACE IS LINKED TO GITHUB, PUSH FILES ATOMICALLY VIA OAUTH
-      if (activeProjectData?.githubRepo && activeProjectData?.githubOwner && githubToken) {
+      if (!skipGitHub && activeProjectData?.githubRepo && activeProjectData?.githubOwner && githubToken) {
         setConsoleLogs(prev => [...prev, 'SYSTEM: Syncing multi-file updates to GitHub branch...']);
         const branch = activeProjectData.githubBranch || 'main';
         await pushCommitToGithub(
           activeProjectData.owner || activeProjectData.githubOwner,
           activeProjectData.githubRepo,
           branch,
-          pendingFilesToSync,
-          changeNameInput.trim(),
+          updatedFiles,
+          commitMessage,
           githubToken
         );
       }
 
-      // Always update Firestore "files" array with pendingFilesToSync.
+      // Always update Firestore "files" array with updatedFiles.
       // Keeping Firestore mirroring active allows teammates who do NOT have GitHub connected to see the latest code instantly in real-time!
       await updateDoc(projectRef, {
-        files: pendingFilesToSync,
+        files: updatedFiles,
         lastChange: {
           by: userHandle,
-          message: changeNameInput.trim(),
+          message: commitMessage,
           timestamp: Date.now()
         }
       });
 
       // HOT RELOAD OPTIMIZATION: Update state immediately so changes render on the explorer instantly
-      setFiles(pendingFilesToSync);
-      lastSyncedFilesRef.current = pendingFilesToSync; // Avoid self-sync triggers
-      setShowChangeModal(false);
-      setPendingFilesToSync(null);
-      setConsoleLogs(prev => [...prev, `SUCCESS: Sync completed - "${changeNameInput.trim()}"`]);
+      setFiles(updatedFiles);
+      lastSyncedFilesRef.current = updatedFiles; // Avoid self-sync triggers
+      setConsoleLogs(prev => [...prev, `SUCCESS: Sync completed - "${commitMessage}"`]);
     } catch (err) {
       console.error(err);
       setConsoleLogs(prev => [...prev, `CRITICAL: Sync failed: ${err.message}`]);
     }
+  };
+
+  const handleConfirmChangeCommit = async (e) => {
+    e.preventDefault();
+    if (!changeNameInput.trim() || !pendingFilesToSync || !currentProjectId) return;
+    await syncFilesToWorkspace(pendingFilesToSync, changeNameInput.trim());
+    setShowChangeModal(false);
+    setPendingFilesToSync(null);
   };
 
   const handleCreateFile = async (e) => {
@@ -1478,8 +1481,11 @@ export default function App() {
           }
         }
 
-        // Trigger pop up to name and sync the workspace changes
-        triggerPushCommitModal(updatedFilesList);
+        // Apply AI changes immediately without forcing a commit prompt.
+        const aiSummary = promptInput.trim()
+          ? `AI update: ${promptInput.trim().slice(0, 72)}${promptInput.trim().length > 72 ? '...' : ''}`
+          : 'AI update';
+        await syncFilesToWorkspace(updatedFilesList, aiSummary, { skipGitHub: false });
       } else {
         setConsoleLogs(prev => [...prev, `CRITICAL: Compilation failed. ${data.error || 'Check server configuration structure.'}`]);
         if (typeof data.chatResponse === 'string' && data.chatResponse.trim()) {
