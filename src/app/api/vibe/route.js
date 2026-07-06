@@ -22,6 +22,7 @@ CRITICAL INSTRUCTION ACTION RULES:
 
 OUTPUT STRUCTURE SPECIFICATION:
 {
+  "chatResponse": "Short, clear explanation for the user in plain English.",
   "filePatches": [
     {
       "name": "filename.extension",
@@ -75,10 +76,12 @@ RESPONSE JSON:`;
     }
 
     const parsedData = JSON.parse(cleanJsonString.trim());
-    return NextResponse.json({ filePatches: parsedData.filePatches });
+    return NextResponse.json({
+      chatResponse: parsedData.chatResponse || '',
+      filePatches: parsedData.filePatches || []
+    });
 
   } catch (error) {
-    // 🚀 FIXED: Added the missing closing quote and parentheses right here!
     console.error('Agent route mapping crash:', error);
     return NextResponse.json({ error: 'System architecture payload format mismatch.' }, { status: 500 });
   }

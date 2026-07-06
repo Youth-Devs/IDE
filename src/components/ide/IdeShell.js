@@ -12,6 +12,7 @@ import {
   slugifyProjectName,
 } from '../../lib/ide-utils';
 import { getWorkspaceRouteState, WORKSPACE_PATH, LOGIN_PATH } from '../../app/workspace/_utils/routes';
+import { Toaster, toast } from 'react-hot-toast';
 
 import {
   auth,
@@ -36,7 +37,7 @@ export default function App() {
   const [globalHackathonProjects, setGlobalHackathonProjects] = useState([]);
   const [adminSubmissions, setAdminSubmissions] = useState([]);
   const [customDomainMode, setCustomDomainMode] = useState(false);
-  
+
   // Admin File Inspection Modal state
   const [selectedAdminProjectFiles, setSelectedAdminProjectFiles] = useState(null);
   const [adminActiveFileContent, setAdminActiveFileContent] = useState('');
@@ -49,11 +50,11 @@ export default function App() {
   const [useGithubForNewProject, setUseGithubForNewProject] = useState(false);
 
   // Workspace vs IDE View state
-  const [currentProjectId, setCurrentProjectIdState] = useState(null); 
+  const [currentProjectId, setCurrentProjectIdState] = useState(null);
   const [projects, setProjects] = useState([]);
   const [newProjectName, setNewProjectName] = useState('');
-  const [workspaceError, setWorkspaceError] = useState(''); 
-  
+  const [workspaceError, setWorkspaceError] = useState('');
+
   // PROJECT CREATION LOADING STATUS
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [projectStatusMessage, setProjectStatusMessage] = useState('');
@@ -109,14 +110,15 @@ export default function App() {
   // Layout & Console Utilities
   const [promptInput, setPromptInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [chatResponse, setChatResponse] = useState('Your AI response will appear here after you run a task.');
   const [consoleLogs, setConsoleLogs] = useState([
     'Ready. Your YouthDevs workspace is online.'
   ]);
   const [previewHtml, setPreviewHtml] = useState('');
 
-  const [leftWidth, setLeftWidth] = useState(240); 
-  const [centerWidth, setCenterWidth] = useState(600); 
-  const [footerHeight, setFooterHeight] = useState(180); 
+  const [leftWidth, setLeftWidth] = useState(240);
+  const [centerWidth, setCenterWidth] = useState(600);
+  const [footerHeight, setFooterHeight] = useState(180);
 
   const isResizingLeft = useRef(false);
   const isResizingCenter = useRef(false);
@@ -377,7 +379,7 @@ export default function App() {
     if (savedTheme) {
       setTheme(savedTheme);
     }
-    
+
     // Retrieve GitHub Token parameter if persistent
     const savedGitToken = localStorage.getItem('github-token');
     if (savedGitToken) {
@@ -497,7 +499,7 @@ export default function App() {
         const data = docSnap.data();
         setSuperchargeUses(data.superchargeUses || 0);
         setCooldownEndTime(data.cooldownEndTime || null);
-        
+
         // Mark admin based on Firestore configurations
         setIsAdmin(data.isAdmin || false);
       } else {
@@ -519,7 +521,7 @@ export default function App() {
         setSubmissionsEnabled(data.submissionsEnabled || false);
       } else {
         // Safe defaults initialization
-        setDoc(hackathonConfigRef, { active: false, submissionsEnabled: false }).catch(() => {});
+        setDoc(hackathonConfigRef, { active: false, submissionsEnabled: false }).catch(() => { });
       }
     });
 
@@ -617,7 +619,7 @@ export default function App() {
       // Clear presence markers when navigating away or switching files
       updateDoc(projectRef, {
         [dynamicPresenceKey]: null
-      }).catch(() => {});
+      }).catch(() => { });
     };
   }, [activeFileId, currentProjectId, user]);
 
@@ -643,12 +645,12 @@ export default function App() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const incomingFiles = data.files || [];
-        
+
         // AUTOMATIC PAGE RELOAD TRIGGER: Detect remote commits in real-time
         if (data.lastChange && data.lastChange.timestamp) {
           const currentHandle = user.email ? user.email.split('@')[0] : 'anonymous';
           const isOtherUser = data.lastChange.by !== currentHandle;
-          
+
           if (lastChangeTimestampRef.current === 0) {
             lastChangeTimestampRef.current = data.lastChange.timestamp;
           } else if (isOtherUser && data.lastChange.timestamp > lastChangeTimestampRef.current) {
@@ -672,7 +674,7 @@ export default function App() {
                 contents.filter(item => item.type === 'file').map(async (item) => {
                   // Fetch private files content from the JSON Contents API endpoint and decode locally
                   const rawRes = await fetch(`https://api.github.com/repos/${data.githubOwner}/${data.githubRepo}/contents/${item.path}?ref=${branch}`, {
-                    headers: { 
+                    headers: {
                       Authorization: `token ${githubToken}`,
                       Accept: 'application/vnd.github.v3+json'
                     }
@@ -684,7 +686,7 @@ export default function App() {
                   } else {
                     rawContent = 'Error loading content';
                   }
-                  
+
                   let language = 'html';
                   if (item.name.endsWith('.css')) language = 'css';
                   if (item.name.endsWith('.js')) language = 'javascript';
@@ -700,7 +702,7 @@ export default function App() {
               if (!filesAreIdentical(loadedFiles, lastSyncedFilesRef.current)) {
                 setFiles(loadedFiles);
                 lastSyncedFilesRef.current = loadedFiles;
-                
+
                 if (loadedFiles.length > 0 && (!activeFileId || !loadedFiles.some(f => f.id === activeFileId))) {
                   setActiveFileId(loadedFiles[0].id);
                   setSelectedContextIds(loadedFiles.map(f => f.id));
@@ -718,7 +720,7 @@ export default function App() {
           if (!filesAreIdentical(incomingFiles, lastSyncedFilesRef.current)) {
             setFiles(incomingFiles);
             lastSyncedFilesRef.current = incomingFiles;
-            
+
             if (incomingFiles.length > 0 && (!activeFileId || !incomingFiles.some(f => f.id === activeFileId))) {
               setActiveFileId(incomingFiles[0].id);
               setSelectedContextIds(incomingFiles.map(f => f.id));
@@ -829,7 +831,7 @@ export default function App() {
       setTotalUsers(snapshot.data().count ?? 0);
     } catch (err) {
       console.warn("Firestore list rules blocked counting users. Falling back gracefully. Error:", err.message);
-      setTotalUsers(1); 
+      setTotalUsers(1);
     }
   };
 
@@ -883,8 +885,8 @@ export default function App() {
   const handleCreateProject = async (e) => {
     e.preventDefault();
     if (!newProjectName.trim() || !user) return;
-    setWorkspaceError(''); 
-    
+    setWorkspaceError('');
+
     // Offline creation guard
     if (!db) {
       const newLocalId = `project-${Date.now()}`;
@@ -1007,10 +1009,10 @@ export default function App() {
       await addDoc(collection(db, 'projects'), {
         slug: newProjectSlug,
         name: newProjectName.trim(),
-        userId: user.uid, 
-        memberUids: [user.uid], 
-        memberEmails: [user.email || 'anonymous'], 
-        presence: {},          
+        userId: user.uid,
+        memberUids: [user.uid],
+        memberEmails: [user.email || 'anonymous'],
+        presence: {},
         files: defaultFiles, // Always initialize defaultFiles in Firestore so non-GitHub teammates can see them immediately!
         githubRepo: gitRepoName || null,
         githubOwner: gitOwner || null,
@@ -1021,7 +1023,7 @@ export default function App() {
           message: 'Workspace Initialized'
         }
       });
-      
+
       setNewProjectName('');
       setUseGithubForNewProject(false);
       router.push(`/${newProjectSlug || cleanedRepoName || 'project'}`);
@@ -1040,7 +1042,7 @@ export default function App() {
     setInviteStatus('');
     const targetEmail = teammateEmailInput.trim().toLowerCase();
     const userEmailSafe = user.email ? user.email.toLowerCase() : '';
-    
+
     if (!targetEmail || !currentProjectId) return;
     if (targetEmail === userEmailSafe) {
       setInviteStatus('You are already the project owner.');
@@ -1241,7 +1243,7 @@ export default function App() {
     const newId = `file-${Date.now()}`;
     const newFile = { id: newId, name, language, content: `` };
     const nextFiles = [...files, newFile];
-    
+
     setActiveFileId(newId);
     setSelectedContextIds([...selectedContextIds, newId]);
     setNewFileName('');
@@ -1255,7 +1257,7 @@ export default function App() {
     e.stopPropagation();
     if (files.length <= 1) return;
     const filtered = files.filter(f => f.id !== idToClose);
-    
+
     if (activeFileId === idToClose) {
       setActiveFileId(filtered[filtered.length - 1].id);
     }
@@ -1273,7 +1275,7 @@ export default function App() {
     files.forEach(file => {
       if (file.language === 'css') {
         const cssMatcher = new RegExp(`<link[^>]*href=["']\\.?/?${file.name}["'][^>]*>`, 'g');
-        bundledHtml = cssMatcher.test(bundledHtml) 
+        bundledHtml = cssMatcher.test(bundledHtml)
           ? bundledHtml.replace(cssMatcher, `<style>\n${file.content}\n</style>`)
           : bundledHtml.replace('</head>', `<style>\n${file.content}\n</style>\n</head>`);
       }
@@ -1398,6 +1400,7 @@ export default function App() {
     }
 
     setIsAiLoading(true);
+    setChatResponse('Thinking through your request...');
     setConsoleLogs([`TASK: "${promptInput}"`, 'SYSTEM: Preparing workspace context...']);
 
     const keepStreaming = { current: true };
@@ -1422,6 +1425,13 @@ export default function App() {
       const data = await response.json();
       keepStreaming.current = false;
       clearInterval(streamId);
+      setChatResponse(
+        typeof data.chatResponse === 'string' && data.chatResponse.trim()
+          ? data.chatResponse.trim()
+          : typeof data.error === 'string' && data.error.trim()
+            ? data.error.trim()
+            : 'I finished the task, but the model did not return a readable explanation.'
+      );
 
       if (data.filePatches && Array.isArray(data.filePatches)) {
         let updatedFilesList = [...files];
@@ -1434,7 +1444,7 @@ export default function App() {
               let language = 'html';
               if (targetName.endsWith('.css')) language = 'css';
               if (targetName.endsWith('.js')) language = 'javascript';
-              updatedFilesList.push({ id: `file-${Date.now()}-${Math.random().toString(36).substr(2,4)}`, name: targetName, language, content: patch.content || '' });
+              updatedFilesList.push({ id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`, name: targetName, language, content: patch.content || '' });
               actionLogs.push(`Added workspace document [${targetName}]`);
             }
           } else if (patch.action === 'update') {
@@ -1472,10 +1482,16 @@ export default function App() {
         triggerPushCommitModal(updatedFilesList);
       } else {
         setConsoleLogs(prev => [...prev, `CRITICAL: Compilation failed. ${data.error || 'Check server configuration structure.'}`]);
+        if (typeof data.chatResponse === 'string' && data.chatResponse.trim()) {
+          setChatResponse(data.chatResponse.trim());
+        } else if (typeof data.error === 'string' && data.error.trim()) {
+          setChatResponse(data.error.trim());
+        }
       }
     } catch (err) {
       keepStreaming.current = false; clearInterval(streamId);
       setConsoleLogs(prev => [...prev, 'CRITICAL: Engine compilation network failure.']);
+      setChatResponse('I hit a network error while trying to complete your request. Please try again.');
       console.error(err);
     } finally {
       setIsAiLoading(false);
@@ -1519,7 +1535,7 @@ export default function App() {
       const submittedBy = user.email || user.uid;
 
       const pRef = doc(db, 'projects', projectId);
-      await updateDoc(pRef, { 
+      await updateDoc(pRef, {
         submitted: true,
         submittedAt,
         submittedBy,
@@ -1537,6 +1553,30 @@ export default function App() {
         submittedBy,
         submittedFiles
       }, { merge: true });
+        // Send payloads to SkipCourse endpoints
+        const toastId = toast.loading("Submitting to SkipCourse...");
+        try {
+          const payload = {
+            userId: user.uid || user.email,
+            codeContent: buildVercelFilesPayload(files),
+          };
+          await Promise.all([
+            fetch("https://deepvalidation.skipcourse.com/api/submit", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            }),
+            fetch("http://localhost:5173/api/submit", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            }),
+          ]);
+          toast.success("Submission successful", { id: toastId });
+        } catch (postErr) {
+          console.error(postErr);
+          toast.error("Failed to submit to SkipCourse", { id: toastId });
+        }
     } catch (err) {
       console.error(err);
       alert("Failed to submit code template files to Admin.");
@@ -1562,7 +1602,7 @@ export default function App() {
   const handleToggleHackathonEvent = async () => {
     const nextState = !hackathonActive;
     setHackathonActive(nextState); // Optimistic update so switch animates instantly
-    
+
     if (!db || !isAdmin) return;
     try {
       const configRef = doc(db, 'system', 'hackathon');
@@ -1575,7 +1615,7 @@ export default function App() {
   const handleToggleSubmissionGate = async () => {
     const nextState = !submissionsEnabled;
     setSubmissionsEnabled(nextState); // Optimistic update so switch animates instantly
-    
+
     if (!db || !isAdmin) return;
     try {
       const configRef = doc(db, 'system', 'hackathon');
@@ -1631,7 +1671,7 @@ export default function App() {
 
     return (
       <div className={`flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
-        <header className="flex h-14 items-center justify-between px-4 border-b z-10 shrink-0 transition-colors border-emerald-900/25 bg-[#07120c]/70 backdrop-blur-md">
+        <Toaster />        <header className="flex h-14 items-center justify-between px-4 border-b z-10 shrink-0 transition-colors border-emerald-900/25 bg-[#07120c]/70 backdrop-blur-md">
           <div className="flex items-center gap-3 max-w-[70%] overflow-hidden">
             <button onClick={() => router.push('/admin')} className={`p-1.5 rounded-lg transition-colors shrink-0 ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-emerald-50 text-emerald-700 hover:text-emerald-900'}`} title="Return to Admin Dashboard">
               <ArrowLeft size={14} />
@@ -1665,11 +1705,10 @@ export default function App() {
                     setAdminActiveFileName(file.name || '');
                     setAdminActiveFileContent(typeof file.content === 'string' ? file.content : '');
                   }}
-                  className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${
-                    adminActiveFileName === file.name
-                      ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
-                      : 'text-slate-400 hover:bg-slate-900/60'
-                  }`}
+                  className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${adminActiveFileName === file.name
+                    ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
+                    : 'text-slate-400 hover:bg-slate-900/60'
+                    }`}
                 >
                   <FileCode size={13} />
                   <span className="truncate">{file.name || 'Untitled file'}</span>
@@ -1725,8 +1764,8 @@ export default function App() {
   // --- RENDER 2: DASHBOARD VIEW PANEL ---
   if (!currentProjectId) {
     return (
-    <div className={`h-screen w-screen flex flex-col font-sans transition-colors duration-200 relative ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
-        
+      <div className={`h-screen w-screen flex flex-col font-sans transition-colors duration-200 relative ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
+
         {/* PROJECT CREATION LOADER OVERLAY STATUS PANEL */}
         {isCreatingProject && (
           <div className={`absolute inset-0 backdrop-blur-md flex flex-col items-center justify-center z-50 p-4 font-mono text-xs gap-3 ${theme === 'dark' ? 'bg-[#050b08]/85 text-emerald-300' : 'bg-white/85 text-emerald-700'}`}>
@@ -1742,16 +1781,15 @@ export default function App() {
             <span className={`text-xs font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>YouthDevs Central Hub</span>
           </div>
           <div className="flex items-center gap-4">
-            
+
             {/* ADMIN ACCESS CONTEXT SWITCHER TRIGGER BUTTON */}
             {canAccessAdminPanel && (
-              <button 
-                onClick={() => router.push(isAdminRoute ? WORKSPACE_PATH : '/admin')} 
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold border hover:scale-105 transition-all ${
-                  isAdminRoute 
-                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' 
-                    : theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30 text-slate-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                }`}
+              <button
+                onClick={() => router.push(isAdminRoute ? WORKSPACE_PATH : '/admin')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold border hover:scale-105 transition-all ${isAdminRoute
+                  ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                  : theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30 text-slate-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                  }`}
               >
                 <ShieldAlert size={12} />
                 <span>{isAdminRoute ? "Switch to Dashboard" : "Admin Panel"}</span>
@@ -1776,8 +1814,8 @@ export default function App() {
               <span>IDE Users: <b className="font-mono font-bold">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
             </div>
 
-            <button 
-              onClick={toggleTheme} 
+            <button
+              onClick={toggleTheme}
               className={`p-2 rounded-lg border transition-all shrink-0 ${theme === 'dark' ? 'border-emerald-900/30 text-emerald-300 hover:bg-[#0b1810]' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}
               title="Toggle system theme"
             >
@@ -1794,7 +1832,7 @@ export default function App() {
         {/* CONDITIONAL RENDER: HACKATHON ADMIN CONTROLLER PANEL VIEW */}
         {canAccessAdminPanel && isAdminRoute ? (
           <main className="flex-1 max-w-4xl w-full mx-auto p-6 md:p-10 overflow-y-auto">
-              <div className={`border p-6 rounded-2xl mb-8 ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 via-slate-950 to-emerald-900/20 border-emerald-900/30' : 'bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border-emerald-200'}`}>
+            <div className={`border p-6 rounded-2xl mb-8 ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 via-slate-950 to-emerald-900/20 border-emerald-900/30' : 'bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border-emerald-200'}`}>
               <div className="flex items-center gap-2 text-emerald-300 font-bold mb-2">
                 <ShieldAlert size={20} />
                 <h2 className="text-lg">Hackathon Control Center</h2>
@@ -1819,21 +1857,19 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setCustomDomainMode((prev) => !prev)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${
-                    customDomainMode ? 'bg-emerald-600' : 'bg-slate-800'
-                  }`}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${customDomainMode ? 'bg-emerald-600' : 'bg-slate-800'
+                    }`}
                 >
                   <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${
-                      customDomainMode ? 'translate-x-5' : 'translate-x-0'
-                    }`}
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${customDomainMode ? 'translate-x-5' : 'translate-x-0'
+                      }`}
                   />
                 </button>
               </div>
 
               {/* BEAUTIFUL VISUAL SWITCH TOGGLES (iOS-style optimistic interactive switches) */}
               <div className="mt-6 flex flex-col gap-5 max-w-md">
-                
+
                 {/* Switch 1: Global Hackathon Event */}
                 <div className={`flex items-center justify-between p-3.5 rounded-xl ${theme === 'dark' ? 'bg-slate-950/40 border border-emerald-900/30' : 'bg-white border border-emerald-200'}`}>
                   <div className="flex flex-col gap-0.5">
@@ -1843,14 +1879,12 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleToggleHackathonEvent}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${
-                      hackathonActive ? 'bg-rose-600' : 'bg-slate-800'
-                    }`}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${hackathonActive ? 'bg-rose-600' : 'bg-slate-800'
+                      }`}
                   >
                     <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${
-                        hackathonActive ? 'translate-x-5' : 'translate-x-0'
-                      }`}
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${hackathonActive ? 'translate-x-5' : 'translate-x-0'
+                        }`}
                     />
                   </button>
                 </div>
@@ -1865,14 +1899,12 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleToggleSubmissionGate}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${
-                        submissionsEnabled ? 'bg-emerald-600' : 'bg-slate-800'
-                      }`}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ease-in-out duration-200 outline-none ${submissionsEnabled ? 'bg-emerald-600' : 'bg-slate-800'
+                        }`}
                     >
                       <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${
-                          submissionsEnabled ? 'translate-x-5' : 'translate-x-0'
-                        }`}
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ease-in-out duration-200 ${submissionsEnabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
                       />
                     </button>
                   </div>
@@ -1960,16 +1992,16 @@ export default function App() {
             <div className={`border p-6 rounded-2xl mb-8 transition-colors ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 to-slate-900 border-slate-800/80' : 'bg-gradient-to-r from-emerald-50/70 to-white border-emerald-200'}`}>
               <h2 className={`text-xl font-black ${theme === 'dark' ? 'text-white' : 'text-emerald-950'}`}>Welcome Back to YouthDevs IDE</h2>
               <p className={`text-xs mt-1 max-w-lg ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>Build collaborative multi-file web apps with your team of up to 3 members. Connect GitHub if you want to sync a project repo while you work.</p>
-              
+
               <form onSubmit={handleCreateProject} className="mt-4 flex flex-col gap-3 max-w-md">
                 <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    placeholder="New project or repository name..." 
-                    value={newProjectName} 
-                    onChange={e => setNewProjectName(e.target.value)} 
-                    required 
-                    className={`flex-1 border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark' ? 'bg-slate-955 border-slate-855 focus:border-emerald-500 text-slate-200' : 'bg-white border-emerald-200 focus:border-emerald-500 text-slate-900'}`} 
+                  <input
+                    type="text"
+                    placeholder="New project or repository name..."
+                    value={newProjectName}
+                    onChange={e => setNewProjectName(e.target.value)}
+                    required
+                    className={`flex-1 border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark' ? 'bg-slate-955 border-slate-855 focus:border-emerald-500 text-slate-200' : 'bg-white border-emerald-200 focus:border-emerald-500 text-slate-900'}`}
                   />
                   <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 rounded-lg flex items-center gap-1 transition shadow-lg shadow-emerald-650/10 shrink-0">
                     <Plus size={14} /> Create Repo
@@ -1979,10 +2011,10 @@ export default function App() {
                 {/* GITHUB ENABLE SYNC TOGGLE */}
                 {githubUser && (
                   <label className="flex items-center gap-2.5 cursor-pointer select-none py-1">
-                    <input 
-                      type="checkbox" 
-                      checked={useGithubForNewProject} 
-                      onChange={e => setUseGithubForNewProject(e.target.checked)} 
+                    <input
+                      type="checkbox"
+                      checked={useGithubForNewProject}
+                      onChange={e => setUseGithubForNewProject(e.target.checked)}
                       className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-emerald-50 h-4 w-4 bg-white"
                     />
                     <span className={`text-xs font-medium flex items-center gap-2 ${theme === 'dark' ? 'text-slate-300' : 'text-emerald-900'}`}>
@@ -2039,13 +2071,12 @@ export default function App() {
                     {/* HACKATHON ASSIGNMENT TOGGLE BUTTONS */}
                     {hackathonActive && (
                       <div className="mt-3 flex gap-2" onClick={e => e.stopPropagation()}>
-                        <button 
+                        <button
                           onClick={() => handleToggleDeemHackathon(proj.id, proj.isHackathonProject || false)}
-                          className={`px-2 py-1 rounded text-[10px] font-mono font-bold border transition-all flex items-center gap-1 ${
-                            proj.isHackathonProject 
-                            ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' 
+                          className={`px-2 py-1 rounded text-[10px] font-mono font-bold border transition-all flex items-center gap-1 ${proj.isHackathonProject
+                            ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400'
                             : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
-                          }`}
+                            }`}
                         >
                           {proj.isHackathonProject ? <CheckSquare size={10} /> : <Square size={10} />}
                           Deemed Submission
@@ -2053,7 +2084,7 @@ export default function App() {
 
                         {/* SUBMIT BUTTON */}
                         {proj.isHackathonProject && submissionsEnabled && !proj.submitted && (
-                          <button 
+                          <button
                             onClick={() => handleSubmitProjectToAdmin(proj.id)}
                             className="px-2 py-1 rounded text-[10px] font-mono font-bold bg-emerald-600 text-white hover:bg-emerald-500 shadow-md shadow-emerald-650/15"
                           >
@@ -2112,14 +2143,14 @@ export default function App() {
       />
 
       <main className="flex flex-1 w-full overflow-hidden relative min-h-0">
-        
+
         {/* EXPLORER TREE VIEW PANEL WITH LIVE PRESENCE BADGES */}
         <section style={{ width: `${leftWidth}px` }} className={`border-r flex flex-col h-full shrink-0 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c]/45' : 'border-emerald-900/25 bg-[#07120c]/45'}`}>
           <div className={`p-3 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300' : 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300'}`}>
             <span className="text-xs font-bold tracking-wider uppercase">Filesystem</span>
             <button onClick={() => setShowNewFileInput(!showNewFileInput)} className={`p-1 rounded transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-500 hover:text-slate-855'}`}><Plus size={14} /></button>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1 custom-scrollbar">
             {showNewFileInput && (
               <form onSubmit={handleCreateFile} className="mb-2">
@@ -2128,17 +2159,16 @@ export default function App() {
             )}
             {files.map(file => {
               const isActive = file.id === activeFileId;
-              
+
               // Presence detection lookups
               const currentFileViewer = activeProjectData?.presence?.[file.id];
               const isTeammateActiveHere = currentFileViewer && currentFileViewer !== (user.email ? user.email.split('@')[0] : 'anonymous');
 
               return (
-                <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer group text-xs font-mono border transition-all ${
-                  isActive 
-                    ? theme === 'dark' ? 'bg-indigo-600/15 border-indigo-500/20 text-slate-100 font-semibold' : 'bg-indigo-50 border-indigo-200 text-indigo-600 font-semibold'
-                    : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/40 border-transparent' : 'text-slate-600 hover:bg-slate-200/50 border-transparent'
-                }`}>
+                <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer group text-xs font-mono border transition-all ${isActive
+                  ? theme === 'dark' ? 'bg-indigo-600/15 border-indigo-500/20 text-slate-100 font-semibold' : 'bg-indigo-50 border-indigo-200 text-indigo-600 font-semibold'
+                  : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/40 border-transparent' : 'text-slate-600 hover:bg-slate-200/50 border-transparent'
+                  }`}>
                   <div className="flex items-center gap-2 overflow-hidden flex-1 mr-1">
                     <div onClick={(e) => { e.stopPropagation(); selectedContextIds.includes(file.id) ? setSelectedContextIds(selectedContextIds.filter(id => id !== file.id)) : setSelectedContextIds([...selectedContextIds, file.id]) }} className={`hover:text-indigo-500 transition-colors p-0.5 ${theme === 'dark' ? 'text-slate-600' : 'text-slate-400'}`}>
                       {selectedContextIds.includes(file.id) ? <CheckSquare size={13} className="text-indigo-500" /> : <Square size={13} />}
@@ -2146,7 +2176,7 @@ export default function App() {
                     <FileCode size={13} className="shrink-0" />
                     <span className="truncate">{file.name}</span>
                   </div>
-                  
+
                   {/* Real-time Team Member Edit Badge color assigned individually */}
                   {isTeammateActiveHere && (() => {
                     const idx = activeProjectData?.memberEmails?.findIndex(m => m.toLowerCase().split('@')[0] === currentFileViewer.toLowerCase());
@@ -2177,15 +2207,14 @@ export default function App() {
                   if (index === 0) clr = theme === 'dark' ? 'text-emerald-400 font-bold' : 'text-emerald-600 font-black';
                   if (index === 1) clr = theme === 'dark' ? 'text-orange-400 font-bold' : 'text-orange-600 font-black';
                   if (index === 2) clr = theme === 'dark' ? 'text-blue-400 font-bold' : 'text-blue-600 font-black';
-                  
+
                   // Is this member current user?
                   const isSelf = user && memberEmail.toLowerCase() === user.email?.toLowerCase();
 
                   return (
                     <div key={memberEmail} className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${
-                        index === 0 ? 'bg-emerald-500' : index === 1 ? 'bg-orange-500' : 'bg-blue-500'
-                      }`} />
+                      <span className={`h-2 w-2 rounded-full ${index === 0 ? 'bg-emerald-500' : index === 1 ? 'bg-orange-500' : 'bg-blue-500'
+                        }`} />
                       <span className={`${clr} truncate max-w-[150px]`}>
                         {handle} {isSelf && <span className="opacity-50 text-[10px] font-normal">(Self)</span>}
                       </span>
@@ -2207,11 +2236,10 @@ export default function App() {
               {files.map(file => {
                 const isActive = file.id === activeFileId;
                 return (
-                  <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`h-9 flex items-center gap-2 px-4 text-xs font-mono border-r cursor-pointer transition-all shrink-0 ${
-                    isActive 
-                      ? theme === 'dark' ? 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20' : 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20'
-                      : theme === 'dark' ? 'bg-[#07120c] text-slate-400 border-r-emerald-900/20' : 'bg-[#07120c] text-slate-400 border-r-emerald-900/20'
-                  }`}>
+                  <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`h-9 flex items-center gap-2 px-4 text-xs font-mono border-r cursor-pointer transition-all shrink-0 ${isActive
+                    ? theme === 'dark' ? 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20' : 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20'
+                    : theme === 'dark' ? 'bg-[#07120c] text-slate-400 border-r-emerald-900/20' : 'bg-[#07120c] text-slate-400 border-r-emerald-900/20'
+                    }`}>
                     <span>{file.name}</span>
                     <X size={10} className="hover:text-red-500 transition-colors" onClick={e => handleCloseFile(file.id, e)} />
                   </div>
@@ -2219,62 +2247,60 @@ export default function App() {
               })}
             </div>
 
-          {/* ACTION COMPONENT: Commit / Save Push Workspace Change Trigger Button */}
-          {isDirty && (
-            <button 
+            {/* ACTION COMPONENT: Commit / Save Push Workspace Change Trigger Button */}
+            {isDirty && (
+              <button
                 onClick={() => triggerPushCommitModal(files)}
                 className="flex items-center gap-1 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md shadow-emerald-950/20 hover:scale-105 animate-pulse"
               >
                 <Save size={12} />
-              <span>{activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Team Change'}</span>
-            </button>
-          )}
+                <span>{activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Team Change'}</span>
+              </button>
+            )}
 
-          <div className="flex items-center gap-2 mr-2">
-            <input
-              type="text"
-              value={deployProjectName}
-              onChange={(e) => setDeployProjectName(e.target.value)}
-              placeholder="Vercel project name"
-              className={`w-40 text-xs font-mono px-3 py-1.5 rounded-lg border outline-none transition-colors ${
-                theme === 'dark'
+            <div className="flex items-center gap-2 mr-2">
+              <input
+                type="text"
+                value={deployProjectName}
+                onChange={(e) => setDeployProjectName(e.target.value)}
+                placeholder="Vercel project name"
+                className={`w-40 text-xs font-mono px-3 py-1.5 rounded-lg border outline-none transition-colors ${theme === 'dark'
                   ? 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
                   : 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
-              }`}
-            />
-            <button
-              onClick={handleDeployToVercel}
-              disabled={isDeployingToVercel || !files.length}
-              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-emerald-950/20"
-            >
-              <Zap size={12} />
-              <span>{isDeployingToVercel ? deployStatusMessage : 'Deploy to Vercel'}</span>
-            </button>
-          </div>
-        </div>
-
-        {(deployStatusMessage || deployError || deployUrl) && (
-          <div className={`px-4 py-2 border-b text-[11px] font-mono ${
-            theme === 'dark' ? 'border-emerald-900/20 bg-[#050b08]/80' : 'border-emerald-900/20 bg-[#050b08]/80'
-          }`}>
-            {deployStatusMessage && !deployError && (
-              <span className="text-emerald-400">{deployStatusMessage}</span>
-            )}
-            {deployError && (
-              <span className="text-rose-400">Deploy error: {deployError}</span>
-            )}
-            {deployUrl && (
-              <a
-                href={deployUrl.startsWith('http') ? deployUrl : `https://${deployUrl}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-emerald-300 hover:underline break-all"
+                  }`}
+              />
+              <button
+                onClick={handleDeployToVercel}
+                disabled={isDeployingToVercel || !files.length}
+                className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 mr-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-emerald-950/20"
               >
-                Live deployment ({deployDomainMode || (customDomainMode ? 'custom' : 'vercel')}): {deployUrl}
-              </a>
-            )}
+                <Zap size={12} />
+                <span>{isDeployingToVercel ? deployStatusMessage : 'Deploy to Vercel'}</span>
+              </button>
+            </div>
           </div>
-        )}
+
+          {(deployStatusMessage || deployError || deployUrl) && (
+            <div className={`px-4 py-2 border-b text-[11px] font-mono ${theme === 'dark' ? 'border-emerald-900/20 bg-[#050b08]/80' : 'border-emerald-900/20 bg-[#050b08]/80'
+              }`}>
+              {deployStatusMessage && !deployError && (
+                <span className="text-emerald-400">{deployStatusMessage}</span>
+              )}
+              {deployError && (
+                <span className="text-rose-400">Deploy error: {deployError}</span>
+              )}
+              {deployUrl && (
+                <a
+                  href={deployUrl.startsWith('http') ? deployUrl : `https://${deployUrl}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-emerald-300 hover:underline break-all"
+                >
+                  Live deployment ({deployDomainMode || (customDomainMode ? 'custom' : 'vercel')}): {deployUrl}
+                </a>
+              )}
+            </div>
+          )}
 
           <div className="flex-1 w-full overflow-hidden bg-[#050b08] relative">
             {!monacoLoaded ? (
@@ -2318,8 +2344,8 @@ export default function App() {
       <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-emerald-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-emerald-900/25' : 'border-emerald-900/25'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
 
       {/* FOOTER INTERACT CONSOLE */}
-      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 flex gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-900/20 bg-[#07120c]/70'}`}>
-        <div className="flex-1 flex flex-col min-w-0 h-full">
+      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 grid grid-cols-1 lg:grid-cols-[1.1fr_1fr_1.1fr] gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-900/20 bg-[#07120c]/70'}`}>
+        <div className="flex flex-col min-w-0 h-full">
           <div className={`flex items-center gap-1.5 mb-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
             <Sparkles size={13} className={isAiLoading ? "animate-spin text-emerald-300" : ""} />
             <span className="text-[11px] font-bold uppercase tracking-wider">Task Terminal</span>
@@ -2330,7 +2356,19 @@ export default function App() {
           </form>
         </div>
 
-        <div className={`w-1/2 flex flex-col min-w-[250px] border-l pl-4 h-full ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
+        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
+          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-300'}`}>
+            <div className="flex items-center gap-1.5"><Sparkles size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Chat Response</span></div>
+            {isAiLoading && <span className="text-[9px] font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/50 px-1.5 py-0.5 rounded-md">AI writing</span>}
+          </div>
+          <div className={`flex-1 border rounded-xl p-3 text-xs leading-relaxed overflow-y-auto custom-scrollbar shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-200' : 'bg-[#050b08] border-emerald-900/30 text-slate-200'}`}>
+            <div className="whitespace-pre-wrap">
+              {chatResponse}
+            </div>
+          </div>
+        </div>
+
+        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
           <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-300'}`}>
             <div className="flex items-center gap-1.5"><Terminal size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Console Pipeline</span></div>
             {lastModelUsed && <span className="text-[9px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/50 px-1.5 py-0.5 rounded-md">{lastModelUsed}</span>}
@@ -2360,28 +2398,27 @@ export default function App() {
                 {activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Collaborative Change'}
               </h3>
             </div>
-            
+
             <p className={`text-xs mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
               Please enter a brief name or description for this changeset. Teammates will see this description in real-time.
             </p>
 
             <form onSubmit={handleConfirmChangeCommit} className="flex flex-col gap-4">
-              <input 
-                type="text" 
-                placeholder="e.g., Fix responsive layout sizing" 
-                value={changeNameInput} 
-                onChange={e => setChangeNameInput(e.target.value)} 
-                required 
+              <input
+                type="text"
+                placeholder="e.g., Fix responsive layout sizing"
+                value={changeNameInput}
+                onChange={e => setChangeNameInput(e.target.value)}
+                required
                 autoFocus
-                className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${
-                  theme === 'dark' 
-                    ? 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200' 
-                    : 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
-                }`} 
+                className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark'
+                  ? 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
+                  : 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
+                  }`}
               />
 
               <div className="flex gap-2 justify-end text-xs font-bold">
-                <button 
+                <button
                   type="button"
                   onClick={() => {
                     setShowChangeModal(false);
@@ -2391,7 +2428,7 @@ export default function App() {
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   disabled={!changeNameInput.trim()}
                   className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg transition shadow-md shadow-emerald-950/20"
@@ -2413,7 +2450,7 @@ export default function App() {
                 <Award className="text-rose-400" size={16} />
                 <span className="text-xs font-bold text-slate-200">Admin Live Grading Sandbox</span>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedAdminProjectFiles(null)}
                 className="text-slate-500 hover:text-white transition"
               >
@@ -2426,17 +2463,16 @@ export default function App() {
               <div className="w-64 border-r border-emerald-900/30 bg-[#050b08] p-3 overflow-y-auto shrink-0 flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Team Files</span>
                 {selectedAdminProjectFiles.map(file => (
-                  <div 
+                  <div
                     key={file.id || file.name}
                     onClick={() => {
                       setAdminActiveFileName(file.name);
                       setAdminActiveFileContent(file.content);
                     }}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${
-                      adminActiveFileName === file.name 
-                        ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20' 
-                        : 'text-slate-400 hover:bg-slate-900/60'
-                    }`}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${adminActiveFileName === file.name
+                      ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
+                      : 'text-slate-400 hover:bg-slate-900/60'
+                      }`}
                   >
                     <FileCode size={13} />
                     <span className="truncate">{file.name}</span>
@@ -2449,7 +2485,7 @@ export default function App() {
                 <div className="h-9 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0">
                   <span className="text-[11px] font-mono text-slate-400">{adminActiveFileName || "Select a file to inspect"}</span>
                 </div>
-                
+
                 <div className="flex-1 p-4 overflow-auto custom-scrollbar">
                   <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text selection:bg-rose-500/30 selection:text-white">
                     {adminActiveFileContent || "No content found inside this file segment."}
