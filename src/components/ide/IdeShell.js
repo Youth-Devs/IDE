@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Sparkles, ChevronRight, FileCode, Plus, X, Terminal, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch, ArrowLeft } from 'lucide-react';
+import { Sparkles, ChevronRight, FileCode, Plus, X, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch, ArrowLeft } from 'lucide-react';
 import { addDoc, arrayUnion, collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import WorkspaceHeader from '../../app/workspace/_components/WorkspaceHeader';
 import {
@@ -24,6 +24,115 @@ import {
   signInWithCustomToken,
   signInAnonymously,
 } from '../../app/workspace/_utils/firebase';
+
+const escapeHtmlText = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}[char]));
+
+const buildDefaultProjectFiles = (projectName, template) => {
+  const safeProjectName = escapeHtmlText(projectName || 'Untitled Project');
+  const jsProjectName = JSON.stringify(projectName || 'YouthDevs Project');
+
+  if (template === 'nextjs') {
+    return [
+      {
+        id: 'package-json',
+        name: 'package.json',
+        language: 'json',
+        content: `{
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "14.2.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {}
+}`
+      },
+      {
+        id: 'app-layout-js',
+        name: 'app/layout.js',
+        language: 'javascript',
+        content: `import './globals.css';
+
+export const metadata = {
+  title: ${jsProjectName},
+  description: 'Built in YouthDevs IDE'
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+`
+      },
+      {
+        id: 'app-page-js',
+        name: 'app/page.js',
+        language: 'javascript',
+        content: `export default function HomePage() {
+  return (
+    <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+      <section className="max-w-xl text-center">
+        <p className="text-xs font-bold uppercase tracking-widest text-emerald-300">Next.js workspace online</p>
+        <h1 className="mt-3 text-4xl font-black">${safeProjectName}</h1>
+        <p className="mt-4 text-sm leading-6 text-slate-300">
+          Edit this starter app and render it with the Next.js preview option.
+        </p>
+      </section>
+    </main>
+  );
+}
+`
+      },
+      {
+        id: 'app-globals-css',
+        name: 'app/globals.css',
+        language: 'css',
+        content: `* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+`
+      }
+    ];
+  }
+
+  return [
+    {
+      id: 'index-html',
+      name: 'index.html',
+      language: 'html',
+      content: `<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
+  <div class="text-center p-6 bg-slate-800 rounded-xl">
+    <h1 class="text-2xl font-bold text-indigo-400">${safeProjectName}</h1>
+    <p class="text-xs text-slate-400 mt-2 font-mono">Workspace online. Happy hackathon coding!</p>
+  </div>
+</body>
+</html>`
+    }
+  ];
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -53,6 +162,7 @@ export default function App() {
   const [currentProjectId, setCurrentProjectIdState] = useState(null);
   const [projects, setProjects] = useState([]);
   const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectTemplate, setNewProjectTemplate] = useState('html');
   const [workspaceError, setWorkspaceError] = useState('');
 
   // PROJECT CREATION LOADING STATUS
@@ -115,6 +225,10 @@ export default function App() {
     'Ready. Your YouthDevs workspace is online.'
   ]);
   const [previewHtml, setPreviewHtml] = useState('');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [renderMode, setRenderMode] = useState('html');
+  const [previewStatus, setPreviewStatus] = useState('HTML preview renders the current workspace in the iframe.');
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   const [leftWidth, setLeftWidth] = useState(240);
   const [centerWidth, setCenterWidth] = useState(600);
@@ -123,7 +237,6 @@ export default function App() {
   const isResizingLeft = useRef(false);
   const isResizingCenter = useRef(false);
   const isResizingFooter = useRef(false);
-  const consoleBottomRef = useRef(null);
   const pathname = usePathname();
   const router = useRouter();
   const {
@@ -173,7 +286,13 @@ export default function App() {
 
   useEffect(() => {
     setPreviewHtml('');
-  }, [currentProjectId]);
+    setPreviewUrl('');
+    const projectRenderMode = activeProjectData?.template === 'nextjs' ? 'nextjs' : 'html';
+    setRenderMode(projectRenderMode);
+    setPreviewStatus(projectRenderMode === 'nextjs'
+      ? 'Next.js preview will run the workspace with npm run dev.'
+      : 'HTML preview renders the current workspace in the iframe.');
+  }, [currentProjectId, activeProjectData?.template]);
 
   const handleGithubSignIn = async () => {
     setAuthBootError('');
@@ -859,10 +978,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [cooldownEndTime, user]);
 
-  useEffect(() => {
-    if (consoleBottomRef.current) consoleBottomRef.current.scrollIntoView({ behavior: 'smooth' });
-  }, [consoleLogs]);
-
   // UI Split Drag Handlers
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -891,34 +1006,19 @@ export default function App() {
     if (!db) {
       const newLocalId = `project-${Date.now()}`;
       const localSlug = slugifyProjectName(newProjectName.trim());
+      const defaultFiles = buildDefaultProjectFiles(newProjectName.trim(), newProjectTemplate);
       const newLocalProj = {
         id: newLocalId,
         slug: localSlug,
         name: newProjectName.trim(),
         memberEmails: ['offline-developer@youthdevs.me'],
         memberUids: ['mock-user-123'],
-        files: [
-          {
-            id: 'index-html',
-            name: 'index.html',
-            language: 'html',
-            content: `<!DOCTYPE html>
-<html>
-<head>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
-  <div class="text-center p-6 bg-slate-800 rounded-xl">
-    <h1 class="text-2xl font-bold text-indigo-400">${newProjectName}</h1>
-    <p class="text-xs text-slate-400 mt-2 font-mono">Local development mode is online.</p>
-  </div>
-</body>
-</html>`
-          }
-        ]
+        template: newProjectTemplate,
+        files: defaultFiles
       };
       setProjects([...projects, newLocalProj]);
       setNewProjectName('');
+      setNewProjectTemplate('html');
       router.push(`/${localSlug || newLocalId}`);
       return;
     }
@@ -928,25 +1028,7 @@ export default function App() {
 
     const cleanedRepoName = newProjectName.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
     const newProjectSlug = slugifyProjectName(newProjectName.trim());
-    const defaultFiles = [
-      {
-        id: 'index-html',
-        name: 'index.html',
-        language: 'html',
-        content: `<!DOCTYPE html>
-<html>
-<head>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
-  <div class="text-center p-6 bg-slate-800 rounded-xl">
-    <h1 class="text-2xl font-bold text-indigo-400">${newProjectName}</h1>
-    <p class="text-xs text-slate-400 mt-2 font-mono">Workspace online. Happy hackathon coding!</p>
-  </div>
-</body>
-</html>`
-      }
-    ];
+    const defaultFiles = buildDefaultProjectFiles(newProjectName.trim(), newProjectTemplate);
 
     try {
       let gitRepoName = '';
@@ -1001,7 +1083,7 @@ export default function App() {
           throw new Error('GitHub branch reference handshake timeout. Please check your network connection.');
         }
 
-        setProjectStatusMessage('Deploying initial index.html templates...');
+        setProjectStatusMessage(`Deploying initial ${newProjectTemplate === 'nextjs' ? 'Next.js' : 'HTML'} template...`);
         await pushCommitToGithub(gitOwner, gitRepoName, 'main', defaultFiles, 'Initial project build', githubToken);
       }
 
@@ -1013,6 +1095,7 @@ export default function App() {
         memberUids: [user.uid],
         memberEmails: [user.email || 'anonymous'],
         presence: {},
+        template: newProjectTemplate,
         files: defaultFiles, // Always initialize defaultFiles in Firestore so non-GitHub teammates can see them immediately!
         githubRepo: gitRepoName || null,
         githubOwner: gitOwner || null,
@@ -1025,6 +1108,7 @@ export default function App() {
       });
 
       setNewProjectName('');
+      setNewProjectTemplate('html');
       setUseGithubForNewProject(false);
       router.push(`/${newProjectSlug || cleanedRepoName || 'project'}`);
     } catch (err) {
@@ -1317,8 +1401,47 @@ export default function App() {
     return bundledHtml;
   };
 
-  const refreshSandboxPreview = () => {
-    setPreviewHtml(getBundledPreviewCode());
+  const refreshSandboxPreview = async () => {
+    if (renderMode === 'html') {
+      setPreviewUrl('');
+      setPreviewHtml(getBundledPreviewCode());
+      setPreviewStatus('HTML preview refreshed from the current workspace files.');
+      return;
+    }
+
+    setIsPreviewLoading(true);
+    setPreviewStatus('Starting Next.js preview with npm run dev...');
+
+    try {
+      const response = await fetch('/api/preview-next', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Next.js preview failed to start.');
+      }
+
+      setPreviewHtml('');
+      setPreviewUrl(`${data.url}?preview=${Date.now()}`);
+      setPreviewStatus(`Next.js preview running at ${data.url}`);
+    } catch (err) {
+      setPreviewUrl('');
+      setPreviewHtml(`<!DOCTYPE html>
+<html>
+<body style="margin:0;background:#050b08;color:#fecdd3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;padding:24px;box-sizing:border-box;text-align:center;">
+  <div>
+    <strong>Next.js preview failed</strong>
+    <div style="margin-top:10px;color:#94a3b8;line-height:1.5;">${String(err.message || err).replace(/[<>&"]/g, '')}</div>
+  </div>
+</body>
+</html>`);
+      setPreviewStatus(err.message || 'Next.js preview failed to start.');
+    } finally {
+      setIsPreviewLoading(false);
+    }
   };
 
   const previewPlaceholderHtml = `<!DOCTYPE html>
@@ -2014,6 +2137,36 @@ export default function App() {
                   </button>
                 </div>
 
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: 'html', label: 'Default HTML', detail: 'index.html starter' },
+                    { value: 'nextjs', label: 'Default Next.js', detail: 'app router starter' }
+                  ].map((templateOption) => {
+                    const isSelected = newProjectTemplate === templateOption.value;
+                    return (
+                      <button
+                        key={templateOption.value}
+                        type="button"
+                        onClick={() => setNewProjectTemplate(templateOption.value)}
+                        className={`text-left rounded-lg border px-3 py-2 transition-colors ${isSelected
+                          ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200'
+                          : theme === 'dark'
+                            ? 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-emerald-500/50'
+                            : 'border-emerald-200 bg-white text-emerald-950 hover:border-emerald-400'
+                          }`}
+                      >
+                        <span className="flex items-center gap-2 text-xs font-bold">
+                          {isSelected ? <CheckSquare size={13} /> : <Square size={13} />}
+                          {templateOption.label}
+                        </span>
+                        <span className={`mt-1 block text-[10px] ${isSelected ? 'text-emerald-200/80' : theme === 'dark' ? 'text-slate-500' : 'text-emerald-700'}`}>
+                          {templateOption.detail}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
                 {/* GITHUB ENABLE SYNC TOGGLE */}
                 {githubUser && (
                   <label className="flex items-center gap-2.5 cursor-pointer select-none py-1">
@@ -2329,19 +2482,31 @@ export default function App() {
             <button
               type="button"
               onClick={refreshSandboxPreview}
+              disabled={isPreviewLoading}
               className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-500/20 bg-emerald-500/10 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/20 transition-colors"
             >
-              <Zap size={10} />
-              Refresh Preview
+              <Zap size={10} className={isPreviewLoading ? 'animate-spin' : ''} />
+              {isPreviewLoading ? 'Rendering...' : 'Refresh Preview'}
             </button>
           </div>
           <div className="flex-1 w-full bg-[#050b08] relative">
-            <iframe
-              title="Live View"
-              srcDoc={previewHtml || previewPlaceholderHtml}
-              sandbox="allow-scripts"
-              className="absolute inset-0 w-full h-full border-none"
-            />
+            {previewUrl ? (
+              <iframe
+                key={`url-${previewUrl}`}
+                title="Live View"
+                src={previewUrl}
+                sandbox="allow-scripts allow-same-origin allow-forms"
+                className="absolute inset-0 w-full h-full border-none"
+              />
+            ) : (
+              <iframe
+                key="html-preview"
+                title="Live View"
+                srcDoc={previewHtml || previewPlaceholderHtml}
+                sandbox="allow-scripts allow-same-origin allow-forms"
+                className="absolute inset-0 w-full h-full border-none"
+              />
+            )}
           </div>
         </section>
       </main>
@@ -2376,18 +2541,44 @@ export default function App() {
 
         <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
           <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-300'}`}>
-            <div className="flex items-center gap-1.5"><Terminal size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Console Pipeline</span></div>
+            <div className="flex items-center gap-1.5"><FileCode size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Render Options</span></div>
             {lastModelUsed && <span className="text-[9px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/50 px-1.5 py-0.5 rounded-md">{lastModelUsed}</span>}
           </div>
-          <div className={`flex-1 border rounded-xl p-3 font-mono text-[11px] overflow-y-auto custom-scrollbar flex flex-col gap-1 shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300' : 'bg-[#050b08] border-emerald-900/30 text-slate-300'}`}>
-            {consoleLogs.map((log, idx) => {
-              let clr = theme === 'dark' ? "text-slate-400" : "text-slate-600";
-              if (log.startsWith('SUCCESS:')) clr = "text-emerald-300 font-medium";
-              if (log.startsWith('CRITICAL:')) clr = "text-emerald-200 font-bold";
-              if (log.startsWith('PROMPT:')) clr = "text-lime-300 italic";
-              return <div key={idx} className={`${clr} break-all whitespace-pre-wrap`}>&gt; {log}</div>;
-            })}
-            <div ref={consoleBottomRef} />
+          <div className={`flex-1 border rounded-xl p-3 text-xs overflow-y-auto custom-scrollbar flex flex-col gap-3 shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300' : 'bg-[#050b08] border-emerald-900/30 text-slate-300'}`}>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Preview Renderer</span>
+              <select
+                value={renderMode}
+                onChange={(e) => {
+                  const nextMode = e.target.value;
+                  setRenderMode(nextMode);
+                  setPreviewHtml('');
+                  setPreviewUrl('');
+                  setPreviewStatus(nextMode === 'html'
+                    ? 'HTML preview renders the current workspace in the iframe.'
+                    : 'Next.js preview will run the workspace with npm run dev.');
+                }}
+                className="w-full rounded-lg border border-emerald-900/35 bg-[#07120c] px-3 py-2 text-xs font-bold text-slate-100 outline-none transition-colors focus:border-emerald-500"
+              >
+                <option value="html">HTML</option>
+                <option value="nextjs">Next.js (npm run dev)</option>
+              </select>
+            </label>
+
+            <div className="rounded-lg border border-emerald-900/25 bg-[#07120c]/70 p-3">
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</div>
+              <div className="text-[11px] leading-relaxed text-slate-300">{previewStatus}</div>
+            </div>
+
+            <button
+              type="button"
+              onClick={refreshSandboxPreview}
+              disabled={isPreviewLoading || files.length === 0}
+              className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-[11px] font-bold text-white shadow-md shadow-emerald-950/20 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-800"
+            >
+              <Zap size={12} className={isPreviewLoading ? 'animate-spin' : ''} />
+              {isPreviewLoading ? 'Rendering Preview' : `Render ${renderMode === 'html' ? 'HTML' : 'Next.js'}`}
+            </button>
           </div>
         </div>
       </footer>

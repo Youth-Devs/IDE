@@ -10,6 +10,7 @@
 
 # next.js
 /.next/
+/.next-preview-workspace/
 /out/
 
 # production
