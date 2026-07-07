@@ -15,7 +15,7 @@ export default function RootLayout({ children }) {
         {/* 🚀 THE FORCE DIRECTIVE: Pull Tailwind directly via CDN to force layout alignment if local compiler stalls */}
         <script src="https://cdn.tailwindcss.com"></script>
       </head>
-      <body className="antialiased bg-[#050b08] text-slate-50 m-0 p-0 overflow-hidden">
+      <body className="antialiased bg-white text-slate-900 m-0 p-0 overflow-hidden">
         {children}
       </body>
     </html>

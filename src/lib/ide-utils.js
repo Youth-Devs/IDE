@@ -3,10 +3,10 @@ export const DEMO_INDEX_HTML = (title, subtitle) => `<!DOCTYPE html>
 <head>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
-  <div class="text-center p-6 bg-slate-800 rounded-xl border border-indigo-500/20">
-    <h1 class="text-2xl font-bold text-indigo-400">${title}</h1>
-    <p class="text-xs text-slate-400 mt-2 font-mono">${subtitle}</p>
+<body class="bg-white text-slate-900 min-h-screen flex items-center justify-center">
+  <div class="text-center p-6 bg-white rounded-xl border border-slate-200 shadow-sm">
+    <h1 class="text-2xl font-bold text-emerald-700">${title}</h1>
+    <p class="text-xs text-slate-500 mt-2 font-mono">${subtitle}</p>
   </div>
 </body>
 </html>`;

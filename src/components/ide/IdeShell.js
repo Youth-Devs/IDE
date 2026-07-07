@@ -83,11 +83,11 @@ export default function RootLayout({ children }) {
         language: 'javascript',
         content: `export default function HomePage() {
   return (
-    <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-6">
+    <main className="min-h-screen bg-white text-slate-900 flex items-center justify-center p-6">
       <section className="max-w-xl text-center">
-        <p className="text-xs font-bold uppercase tracking-widest text-emerald-300">Next.js workspace online</p>
+        <p className="text-xs font-bold uppercase tracking-widest text-emerald-600">Next.js workspace online</p>
         <h1 className="mt-3 text-4xl font-black">${safeProjectName}</h1>
-        <p className="mt-4 text-sm leading-6 text-slate-300">
+        <p className="mt-4 text-sm leading-6 text-slate-600">
           Edit this starter app and render it with the Next.js preview option.
         </p>
       </section>
@@ -123,10 +123,10 @@ body {
 <head>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
-  <div class="text-center p-6 bg-slate-800 rounded-xl">
-    <h1 class="text-2xl font-bold text-indigo-400">${safeProjectName}</h1>
-    <p class="text-xs text-slate-400 mt-2 font-mono">Workspace online. Happy hackathon coding!</p>
+<body class="bg-white text-slate-900 min-h-screen flex items-center justify-center">
+  <div class="text-center p-6 bg-white rounded-xl border border-slate-200 shadow-sm">
+    <h1 class="text-2xl font-bold text-emerald-700">${safeProjectName}</h1>
+    <p class="text-xs text-slate-500 mt-2 font-mono">Workspace online. Happy hackathon coding!</p>
   </div>
 </body>
 </html>`
@@ -420,7 +420,7 @@ export default function App() {
     try {
       const payload = {
         projectName,
-        framework: null,
+        framework: activeProjectData?.template === 'nextjs' ? 'nextjs' : 'html',
         files: buildVercelFilesPayload(files),
         useCustomDomain: customDomainMode,
       };
@@ -596,10 +596,10 @@ export default function App() {
 <head>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center">
-  <div class="text-center p-6 bg-slate-800 rounded-xl border border-indigo-500/20">
-    <h1 class="text-2xl font-bold text-indigo-400">Offline Demonstration Project</h1>
-    <p class="text-xs text-slate-400 mt-2 font-mono">Fill in your __firebase_config values to enable live cloud features!</p>
+<body class="bg-white text-slate-900 min-h-screen flex items-center justify-center">
+  <div class="text-center p-6 bg-white rounded-xl border border-slate-200 shadow-sm">
+    <h1 class="text-2xl font-bold text-emerald-700">Offline Demonstration Project</h1>
+    <p class="text-xs text-slate-500 mt-2 font-mono">Fill in your __firebase_config values to enable live cloud features!</p>
   </div>
 </body>
 </html>`
@@ -1416,7 +1416,16 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ files })
       });
-      const data = await response.json();
+      const responseText = await response.text();
+      let data = null;
+      try {
+        data = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        const previewError = responseText.includes('<!DOCTYPE') || responseText.includes('<html')
+          ? 'Preview returned an HTML error page instead of JSON.'
+          : responseText || 'Next.js preview failed to start.';
+        throw new Error(previewError);
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Next.js preview failed to start.');
@@ -1451,8 +1460,8 @@ export default function App() {
       margin: 0;
       width: 100%;
       height: 100%;
-      background: #050b08;
-      color: #86efac;
+      background: #ffffff;
+      color: #0f172a;
       font-family: monospace;
     }
     .wrap {
@@ -1466,10 +1475,11 @@ export default function App() {
     }
     .card {
       max-width: 360px;
-      border: 1px solid rgba(16, 185, 129, 0.25);
-      background: rgba(8, 20, 13, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(255, 255, 255, 0.96);
       border-radius: 16px;
       padding: 18px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
     }
     .title {
       font-size: 14px;
@@ -1479,7 +1489,7 @@ export default function App() {
     .body {
       font-size: 12px;
       line-height: 1.6;
-      color: #94a3b8;
+      color: #475569;
     }
   </style>
 </head>
@@ -2232,7 +2242,9 @@ export default function App() {
                           onClick={() => handleToggleDeemHackathon(proj.id, proj.isHackathonProject || false)}
                           className={`px-2 py-1 rounded text-[10px] font-mono font-bold border transition-all flex items-center gap-1 ${proj.isHackathonProject
                             ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400'
-                            : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                            : theme === 'dark'
+                              ? 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300 hover:border-slate-700'
+                              : 'bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300'
                             }`}
                         >
                           {proj.isHackathonProject ? <CheckSquare size={10} /> : <Square size={10} />}

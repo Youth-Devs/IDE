@@ -32,6 +32,48 @@ function normalizeFiles(files) {
     .filter(Boolean);
 }
 
+function detectFramework(files, requestedFramework) {
+  const explicitFramework = String(requestedFramework || '').toLowerCase();
+  if (explicitFramework === 'nextjs') {
+    return 'nextjs';
+  }
+
+  const packageJsonFile = files.find((file) => file.file === 'package.json');
+  if (packageJsonFile?.data) {
+    try {
+      const packageJson = JSON.parse(packageJsonFile.data);
+      const dependencyBuckets = [
+        packageJson.dependencies,
+        packageJson.devDependencies,
+        packageJson.peerDependencies,
+        packageJson.optionalDependencies,
+      ].filter(Boolean);
+
+      const hasNextDependency = dependencyBuckets.some((bucket) => Boolean(bucket.next));
+      const nextScripts = ['dev', 'build', 'start'].some((scriptName) => {
+        const script = packageJson.scripts?.[scriptName];
+        return typeof script === 'string' && /\bnext\b/.test(script);
+      });
+
+      if (hasNextDependency || nextScripts) {
+        return 'nextjs';
+      }
+    } catch {
+      // Ignore malformed package.json and fall back to file-based detection.
+    }
+  }
+
+  const hasNextAppStructure = files.some((file) =>
+    /^app\/layout\.(js|jsx|ts|tsx)$/.test(file.file) ||
+    /^app\/page\.(js|jsx|ts|tsx)$/.test(file.file) ||
+    /^pages\/_app\.(js|jsx|ts|tsx)$/.test(file.file) ||
+    /^pages\/index\.(js|jsx|ts|tsx)$/.test(file.file) ||
+    /^next\.config\.(js|mjs|cjs|ts)$/.test(file.file)
+  );
+
+  return hasNextAppStructure ? 'nextjs' : null;
+}
+
 function extractErrorMessage(payload) {
   if (!payload) return 'Unknown Vercel error.';
   if (typeof payload === 'string') return payload;
@@ -77,7 +119,7 @@ async function findExistingProject(token, projectName) {
   return projects.find((project) => project?.name === projectName) || null;
 }
 
-async function ensureProject(token, projectName, useCustomDomain, aliasDomain) {
+async function ensureProject(token, projectName, useCustomDomain, aliasDomain, framework) {
   const existingProject = await findExistingProject(token, projectName);
   if (existingProject) {
     return existingProject;
@@ -87,7 +129,7 @@ async function ensureProject(token, projectName, useCustomDomain, aliasDomain) {
     method: 'POST',
     body: JSON.stringify({
       name: projectName,
-      framework: null,
+      framework,
       ...(useCustomDomain ? { alias: aliasDomain } : {}),
     }),
   });
@@ -111,12 +153,12 @@ async function ensureProjectDomain(token, projectId, aliasDomain) {
   }
 }
 
-async function createDeployment(token, { projectName, files, aliasDomain, useCustomDomain }) {
+async function createDeployment(token, { projectName, files, aliasDomain, useCustomDomain, framework }) {
   const payload = {
     name: projectName,
     files,
     projectSettings: {
-      framework: null,
+      framework,
     },
   };
 
@@ -128,6 +170,22 @@ async function createDeployment(token, { projectName, files, aliasDomain, useCus
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+async function ensureProjectAlias(token, deploymentId, aliasDomain) {
+  if (!deploymentId || !aliasDomain) return null;
+
+  try {
+    return await vercelRequest(token, `/v2/deployments/${deploymentId}/aliases`, {
+      method: 'POST',
+      body: JSON.stringify({ alias: aliasDomain }),
+    });
+  } catch (error) {
+    if (error.status === 409) {
+      return { alreadyExists: true };
+    }
+    throw error;
+  }
 }
 
 export async function POST(request) {
@@ -144,12 +202,13 @@ export async function POST(request) {
     const projectName = slug || 'hackathon-project';
     const aliasDomain = useCustomDomain ? `${projectName}.youthdevs.me` : `${projectName}.vercel.app`;
     const files = normalizeFiles(body?.files);
+    const framework = detectFramework(files, body?.framework);
 
     if (!files.length) {
       return NextResponse.json({ error: 'At least one file is required for deployment.' }, { status: 400 });
     }
 
-    const project = await ensureProject(token, projectName, useCustomDomain, aliasDomain);
+    const project = await ensureProject(token, projectName, useCustomDomain, aliasDomain, framework);
     const projectId = project?.id || project?.projectId || null;
 
     if (!projectId) {
@@ -160,15 +219,29 @@ export async function POST(request) {
       await ensureProjectDomain(token, projectId, aliasDomain);
     }
 
-    await createDeployment(token, {
+    const deployment = await createDeployment(token, {
       projectName,
       files,
       aliasDomain,
       useCustomDomain,
+      framework,
     });
 
+    const deploymentId = deployment?.id || deployment?.uid || deployment?.deployment?.id || deployment?.deployment?.uid || null;
+    const deploymentUrl = deployment?.url ? `https://${deployment.url}` : '';
+    const resolvedUrl = deploymentUrl || `https://${aliasDomain}`;
+
+    if (useCustomDomain && deploymentId && aliasDomain) {
+      try {
+        await ensureProjectAlias(token, deploymentId, aliasDomain);
+      } catch (aliasError) {
+        console.warn('Vercel alias assignment failed:', aliasError?.message || aliasError);
+      }
+    }
+
     return NextResponse.json({
-      url: `https://${aliasDomain}`,
+      url: resolvedUrl,
+      deploymentUrl: deploymentUrl || resolvedUrl,
       projectId,
       projectName,
       domainMode: useCustomDomain ? 'custom' : 'vercel',
