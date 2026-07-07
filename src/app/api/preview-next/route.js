@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server';
 const PREVIEW_PORT = 4173;
 const PREVIEW_DIR = path.join(process.cwd(), '.next-preview-workspace');
 const NEXT_CLI_PATH = path.join(process.cwd(), 'node_modules', 'next', 'dist', 'bin', 'next');
+const isHostedRuntime = () => Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 const getPreviewState = () => {
   if (!globalThis.__youthdevsNextPreview) {
@@ -76,6 +77,12 @@ export async function POST(request) {
 
     if (sourceFiles.length === 0) {
       return NextResponse.json({ error: 'No files were provided for the Next.js preview.' }, { status: 400 });
+    }
+
+    if (isHostedRuntime()) {
+      return NextResponse.json({
+        error: 'Next.js live preview requires running the IDE locally. Deployed/serverless hosts are read-only and cannot run a long-lived npm run dev server for the iframe.'
+      }, { status: 501 });
     }
 
     const previewState = getPreviewState();

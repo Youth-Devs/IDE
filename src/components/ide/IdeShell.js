@@ -562,8 +562,6 @@ export default function App() {
     });
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setTheme('dark');
-      localStorage.setItem('ide-theme', 'dark');
       setUser(currentUser);
       setAuthLoading(false);
       if (!currentUser) {
@@ -1756,7 +1754,7 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#050b08] text-emerald-300'}`}>
+      <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#eef7f1] text-emerald-700'}`}>
         <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent animate-spin rounded-full"></div>
         Loading YouthDevs IDE...
         {authBootError && <span className="text-[11px] text-slate-500 px-4 text-center max-w-md">{authBootError}</span>}
@@ -1766,7 +1764,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className={`h-screen w-screen flex items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#050b08] text-emerald-300'}`}>
+      <div className={`h-screen w-screen flex items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#eef7f1] text-emerald-700'}`}>
         Opening sign-in screen...
       </div>
     );
@@ -1774,7 +1772,7 @@ export default function App() {
 
   if (routeMode === 'project' && !currentProjectId) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-[#050b08] text-emerald-300 font-mono text-xs">
+      <div className={`h-screen w-screen flex items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#eef7f1] text-emerald-700'}`}>
         Resolving project workspace...
       </div>
     );
@@ -1836,7 +1834,7 @@ export default function App() {
                   }}
                   className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${adminActiveFileName === file.name
                     ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
-                    : 'text-slate-400 hover:bg-slate-900/60'
+                    : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/60' : 'text-slate-600 hover:bg-emerald-50'
                     }`}
                 >
                   <FileCode size={13} />
@@ -1927,12 +1925,12 @@ export default function App() {
 
             {/* DYNAMIC GITHUB HUBLINK CONTROLLER INDICATOR */}
             {githubUser ? (
-              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${theme === 'dark' ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300' : 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300'}`}>
+              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border ${theme === 'dark' ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                 <Github size={11} />
                 <span>Git Connected: <b>{githubUser.login}</b></span>
               </div>
             ) : (
-              <button onClick={handleGithubSignIn} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border hover:scale-105 transition-all ${theme === 'dark' ? 'bg-amber-955/25 border-amber-900/30 text-amber-400' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+              <button onClick={handleGithubSignIn} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border hover:scale-105 transition-all ${theme === 'dark' ? 'bg-amber-950/25 border-amber-900/30 text-amber-400' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
                 <Github size={11} />
                 <span>Link GitHub Account</span>
               </button>
@@ -1961,7 +1959,7 @@ export default function App() {
         {/* CONDITIONAL RENDER: HACKATHON ADMIN CONTROLLER PANEL VIEW */}
         {canAccessAdminPanel && isAdminRoute ? (
           <main className="flex-1 max-w-4xl w-full mx-auto p-6 md:p-10 overflow-y-auto">
-            <div className={`border p-6 rounded-2xl mb-8 ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 via-slate-950 to-emerald-900/20 border-emerald-900/30' : 'bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border-emerald-200'}`}>
+          <div className={`border p-6 rounded-2xl mb-8 ${theme === 'dark' ? 'bg-gradient-to-r from-emerald-950/35 via-slate-950 to-emerald-900/20 border-emerald-900/30' : 'bg-gradient-to-r from-emerald-50 via-white to-emerald-50 border-emerald-200'}`}>
               <div className="flex items-center gap-2 text-emerald-300 font-bold mb-2">
                 <ShieldAlert size={20} />
                 <h2 className="text-lg">Hackathon Control Center</h2>
@@ -1970,7 +1968,7 @@ export default function App() {
                 As a project administrator, you can toggle global Hackathon event registrations, open submission gateways, and dynamically view/inspect active submission source trees in real-time.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-mono">
-                <span className={`px-2 py-1 rounded-full border ${customDomainMode ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                <span className={`px-2 py-1 rounded-full border ${customDomainMode ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' : theme === 'dark' ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-emerald-200'}`}>
                   Domain mode: {customDomainMode ? 'Custom youthdevs.me aliases' : 'Standard vercel.app aliases'}
                 </span>
                 <span className={`px-2 py-1 rounded-full border ${theme === 'dark' ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-white text-emerald-700 border-emerald-200'}`}>
@@ -2130,7 +2128,7 @@ export default function App() {
                     value={newProjectName}
                     onChange={e => setNewProjectName(e.target.value)}
                     required
-                    className={`flex-1 border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark' ? 'bg-slate-955 border-slate-855 focus:border-emerald-500 text-slate-200' : 'bg-white border-emerald-200 focus:border-emerald-500 text-slate-900'}`}
+                    className={`flex-1 border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark' ? 'bg-slate-950 border-slate-800 focus:border-emerald-500 text-slate-200' : 'bg-white border-emerald-200 focus:border-emerald-500 text-slate-900'}`}
                   />
                   <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 rounded-lg flex items-center gap-1 transition shadow-lg shadow-emerald-650/10 shrink-0">
                     <Plus size={14} /> Create Repo
@@ -2304,16 +2302,16 @@ export default function App() {
       <main className="flex flex-1 w-full overflow-hidden relative min-h-0">
 
         {/* EXPLORER TREE VIEW PANEL WITH LIVE PRESENCE BADGES */}
-        <section style={{ width: `${leftWidth}px` }} className={`border-r flex flex-col h-full shrink-0 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c]/45' : 'border-emerald-900/25 bg-[#07120c]/45'}`}>
-          <div className={`p-3 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300' : 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300'}`}>
+        <section style={{ width: `${leftWidth}px` }} className={`border-r flex flex-col h-full shrink-0 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c]/45' : 'border-emerald-200 bg-white/80'}`}>
+          <div className={`p-3 border-b flex items-center justify-between shrink-0 transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#08140d]/60 text-slate-300' : 'border-emerald-200 bg-white/80 text-slate-700'}`}>
             <span className="text-xs font-bold tracking-wider uppercase">Filesystem</span>
-            <button onClick={() => setShowNewFileInput(!showNewFileInput)} className={`p-1 rounded transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-500 hover:text-slate-855'}`}><Plus size={14} /></button>
+            <button onClick={() => setShowNewFileInput(!showNewFileInput)} className={`p-1 rounded transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-emerald-50 text-slate-500 hover:text-slate-700'}`}><Plus size={14} /></button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1 custom-scrollbar">
             {showNewFileInput && (
               <form onSubmit={handleCreateFile} className="mb-2">
-                <input type="text" autoFocus placeholder="filename.html..." value={newFileName} onChange={e => setNewFileName(e.target.value)} onBlur={() => setTimeout(() => setShowNewFileInput(false), 200)} className={`w-full border rounded px-2 py-1 text-xs outline-none font-mono ${theme === 'dark' ? 'bg-[#050b08] border-emerald-500 text-slate-200' : 'bg-[#050b08] border-emerald-500 text-slate-200'}`} />
+                <input type="text" autoFocus placeholder="filename.html..." value={newFileName} onChange={e => setNewFileName(e.target.value)} onBlur={() => setTimeout(() => setShowNewFileInput(false), 200)} className={`w-full border rounded px-2 py-1 text-xs outline-none font-mono ${theme === 'dark' ? 'bg-[#050b08] border-emerald-500 text-slate-200' : 'bg-white border-emerald-200 text-slate-900 placeholder-slate-400'}`} />
               </form>
             )}
             {files.map(file => {
@@ -2357,8 +2355,8 @@ export default function App() {
 
           {/* ACTIVE MEMBERS IN THEIR RESPECTIVE COLORS LIST (Left Panel Footer Container) */}
           {activeProjectData && (
-            <div className={`p-3 border-t shrink-0 transition-colors text-[11px] font-mono flex flex-col gap-1.5 ${theme === 'dark' ? 'border-slate-800/60 bg-slate-955/40' : 'border-slate-200 bg-slate-100'}`}>
-              <div className={`text-[10px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-500' : 'text-slate-400'}`}>Active Team</div>
+            <div className={`p-3 border-t shrink-0 transition-colors text-[11px] font-mono flex flex-col gap-1.5 ${theme === 'dark' ? 'border-slate-800/60 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+              <div className={`text-[10px] font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-500' : 'text-slate-500'}`}>Active Team</div>
               <div className="flex flex-col gap-1">
                 {activeProjectData.memberEmails?.map((memberEmail, index) => {
                   const handle = memberEmail.split('@')[0];
@@ -2389,15 +2387,15 @@ export default function App() {
         <div className={`w-1.5 h-full cursor-ew-resize bg-transparent hover:bg-indigo-500/40 transition-colors z-20 shrink-0`} onMouseDown={() => { isResizingLeft.current = true; }} />
 
         {/* CODE EDITOR WINDOW */}
-        <section style={{ width: `${centerWidth}px` }} className={`flex flex-col h-full shrink-0 overflow-hidden border-r transition-colors ${theme === 'dark' ? 'bg-[#07120c] border-emerald-900/25' : 'bg-[#07120c] border-emerald-900/25'}`}>
-          <div className={`h-9 border-b flex items-center justify-between overflow-x-auto shrink-0 select-none transition-colors ${theme === 'dark' ? 'bg-[#08140d]/60 border-emerald-900/20' : 'bg-[#08140d]/60 border-emerald-900/20'}`}>
+        <section style={{ width: `${centerWidth}px` }} className={`flex flex-col h-full shrink-0 overflow-hidden border-r transition-colors ${theme === 'dark' ? 'bg-[#07120c] border-emerald-900/25' : 'bg-white border-emerald-200'}`}>
+          <div className={`h-9 border-b flex items-center justify-between overflow-x-auto shrink-0 select-none transition-colors ${theme === 'dark' ? 'bg-[#08140d]/60 border-emerald-900/20' : 'bg-emerald-50/80 border-emerald-200'}`}>
             <div className="flex items-center overflow-x-auto">
               {files.map(file => {
                 const isActive = file.id === activeFileId;
                 return (
                   <div key={file.id} onClick={() => setActiveFileId(file.id)} className={`h-9 flex items-center gap-2 px-4 text-xs font-mono border-r cursor-pointer transition-all shrink-0 ${isActive
-                    ? theme === 'dark' ? 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20' : 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20'
-                    : theme === 'dark' ? 'bg-[#07120c] text-slate-400 border-r-emerald-900/20' : 'bg-[#07120c] text-slate-400 border-r-emerald-900/20'
+                    ? theme === 'dark' ? 'bg-[#0b1810] border-t-2 border-t-emerald-500 text-slate-100 border-r-emerald-900/20' : 'bg-white border-t-2 border-t-emerald-500 text-emerald-900 border-r-emerald-200'
+                    : theme === 'dark' ? 'bg-[#07120c] text-slate-400 border-r-emerald-900/20' : 'bg-emerald-50 text-slate-500 border-r-emerald-200'
                     }`}>
                     <span>{file.name}</span>
                     <X size={10} className="hover:text-red-500 transition-colors" onClick={e => handleCloseFile(file.id, e)} />
@@ -2425,7 +2423,7 @@ export default function App() {
                 placeholder="Vercel project name"
                 className={`w-40 text-xs font-mono px-3 py-1.5 rounded-lg border outline-none transition-colors ${theme === 'dark'
                   ? 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
-                  : 'bg-[#050b08] border-emerald-900/35 text-slate-200 placeholder-slate-500 focus:border-emerald-500'
+                  : 'bg-white border-emerald-200 text-slate-900 placeholder-slate-400 focus:border-emerald-500'
                   }`}
               />
               <button
@@ -2440,7 +2438,7 @@ export default function App() {
           </div>
 
           {(deployStatusMessage || deployError || deployUrl) && (
-            <div className={`px-4 py-2 border-b text-[11px] font-mono ${theme === 'dark' ? 'border-emerald-900/20 bg-[#050b08]/80' : 'border-emerald-900/20 bg-[#050b08]/80'
+            <div className={`px-4 py-2 border-b text-[11px] font-mono ${theme === 'dark' ? 'border-emerald-900/20 bg-[#050b08]/80' : 'border-emerald-200 bg-white/85'
               }`}>
               {deployStatusMessage && !deployError && (
                 <span className="text-emerald-400">{deployStatusMessage}</span>
@@ -2512,39 +2510,39 @@ export default function App() {
       </main>
 
       {/* DRAG HANDLER 3 */}
-      <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-emerald-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-emerald-900/25' : 'border-emerald-900/25'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
+      <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-emerald-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-emerald-900/25' : 'border-emerald-200'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
 
       {/* FOOTER INTERACT CONSOLE */}
-      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 grid grid-cols-1 lg:grid-cols-[1.1fr_1fr_1.1fr] gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-900/20 bg-[#07120c]/70'}`}>
+      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 grid grid-cols-1 lg:grid-cols-[1.1fr_1fr_1.1fr] gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-200 bg-white/90'}`}>
         <div className="flex flex-col min-w-0 h-full">
           <div className={`flex items-center gap-1.5 mb-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
             <Sparkles size={13} className={isAiLoading ? "animate-spin text-emerald-300" : ""} />
             <span className="text-[11px] font-bold uppercase tracking-wider">Task Terminal</span>
           </div>
-          <form onSubmit={handleAgenticVibeSubmit} className={`flex-1 flex items-stretch gap-2 border rounded-xl p-2 transition-all ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60' : 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60'}`}>
-            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Boost mode cooling down..." : "Describe the change you want made..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-200 placeholder-slate-500'}`} />
+          <form onSubmit={handleAgenticVibeSubmit} className={`flex-1 flex items-stretch gap-2 border rounded-xl p-2 transition-all ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60' : 'bg-white border-emerald-200 focus-within:border-emerald-500/60'}`}>
+            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Boost mode cooling down..." : "Describe the change you want made..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-700 placeholder-slate-400'}`} />
             <button type="submit" disabled={isAiLoading || !promptInput.trim()} className="self-end flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition shrink-0 shadow-lg shadow-emerald-950/20">Run <ChevronRight size={12} /></button>
           </form>
         </div>
 
-        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
-          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-300'}`}>
+        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-200'}`}>
+          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>
             <div className="flex items-center gap-1.5"><Sparkles size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Chat Response</span></div>
             {isAiLoading && <span className="text-[9px] font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/50 px-1.5 py-0.5 rounded-md">AI writing</span>}
           </div>
-          <div className={`flex-1 border rounded-xl p-3 text-xs leading-relaxed overflow-y-auto custom-scrollbar shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-200' : 'bg-[#050b08] border-emerald-900/30 text-slate-200'}`}>
+          <div className={`flex-1 border rounded-xl p-3 text-xs leading-relaxed overflow-y-auto custom-scrollbar shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-200' : 'bg-white border-emerald-200 text-slate-700'}`}>
             <div className="whitespace-pre-wrap">
               {chatResponse}
             </div>
           </div>
         </div>
 
-        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-900/20'}`}>
-          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-300'}`}>
+        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-200'}`}>
+          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>
             <div className="flex items-center gap-1.5"><FileCode size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Render Options</span></div>
             {lastModelUsed && <span className="text-[9px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/50 px-1.5 py-0.5 rounded-md">{lastModelUsed}</span>}
           </div>
-          <div className={`flex-1 border rounded-xl p-3 text-xs overflow-y-auto custom-scrollbar flex flex-col gap-3 shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300' : 'bg-[#050b08] border-emerald-900/30 text-slate-300'}`}>
+          <div className={`flex-1 border rounded-xl p-3 text-xs overflow-y-auto custom-scrollbar flex flex-col gap-3 shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300' : 'bg-white border-emerald-200 text-slate-700'}`}>
             <label className="flex flex-col gap-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Preview Renderer</span>
               <select
@@ -2558,16 +2556,16 @@ export default function App() {
                     ? 'HTML preview renders the current workspace in the iframe.'
                     : 'Next.js preview will run the workspace with npm run dev.');
                 }}
-                className="w-full rounded-lg border border-emerald-900/35 bg-[#07120c] px-3 py-2 text-xs font-bold text-slate-100 outline-none transition-colors focus:border-emerald-500"
+                className={`w-full rounded-lg border px-3 py-2 text-xs font-bold outline-none transition-colors focus:border-emerald-500 ${theme === 'dark' ? 'border-emerald-900/35 bg-[#07120c] text-slate-100' : 'border-emerald-200 bg-white text-slate-700'}`}
               >
                 <option value="html">HTML</option>
                 <option value="nextjs">Next.js (npm run dev)</option>
               </select>
             </label>
 
-            <div className="rounded-lg border border-emerald-900/25 bg-[#07120c]/70 p-3">
+            <div className={`rounded-lg border p-3 ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c]/70' : 'border-emerald-200 bg-emerald-50/70'}`}>
               <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</div>
-              <div className="text-[11px] leading-relaxed text-slate-300">{previewStatus}</div>
+              <div className={`text-[11px] leading-relaxed ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>{previewStatus}</div>
             </div>
 
             <button
@@ -2610,7 +2608,7 @@ export default function App() {
                 autoFocus
                 className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark'
                   ? 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
-                  : 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
+                  : 'bg-white border-emerald-200 focus:border-emerald-500 text-slate-900'
                   }`}
               />
 
@@ -2668,7 +2666,7 @@ export default function App() {
                     }}
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${adminActiveFileName === file.name
                       ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
-                      : 'text-slate-400 hover:bg-slate-900/60'
+                      : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/60' : 'text-slate-600 hover:bg-emerald-50'
                       }`}
                   >
                     <FileCode size={13} />

@@ -41,18 +41,18 @@ export default function WorkspaceHeader({
         {activeProjectData?.lastChange && (() => {
           const idx = activeProjectData.memberEmails?.findIndex((m) => m.toLowerCase().split('@')[0] === activeProjectData.lastChange.by?.toLowerCase());
 
-          let containerClass = theme === 'dark' ? 'bg-slate-955 border-slate-800 text-slate-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700';
-          let authorClass = 'font-bold';
+          let containerClass = theme === 'dark' ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700';
+          let authorClass = theme === 'dark' ? 'font-bold text-slate-200' : 'font-bold text-emerald-900';
 
           if (idx === 0) {
-            containerClass = theme === 'dark' ? 'bg-emerald-955/25 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700';
-            authorClass = 'font-black text-emerald-600 dark:text-emerald-400';
+            containerClass = theme === 'dark' ? 'bg-emerald-950/25 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700';
+            authorClass = theme === 'dark' ? 'font-black text-emerald-400' : 'font-black text-emerald-700';
           } else if (idx === 1) {
-            containerClass = theme === 'dark' ? 'bg-amber-955/25 border-amber-500/30 text-amber-400' : 'bg-amber-50 border-amber-200 text-amber-700';
-            authorClass = 'font-black text-amber-600 dark:text-amber-400';
+            containerClass = theme === 'dark' ? 'bg-amber-950/25 border-amber-500/30 text-amber-400' : 'bg-amber-50 border-amber-200 text-amber-700';
+            authorClass = theme === 'dark' ? 'font-black text-amber-400' : 'font-black text-amber-700';
           } else if (idx === 2) {
             containerClass = theme === 'dark' ? 'bg-lime-950/25 border-lime-500/30 text-lime-400' : 'bg-lime-50 border-lime-200 text-lime-700';
-            authorClass = 'font-black text-lime-600 dark:text-lime-400';
+            authorClass = theme === 'dark' ? 'font-black text-lime-400' : 'font-black text-lime-700';
           }
 
           return (
@@ -67,7 +67,7 @@ export default function WorkspaceHeader({
       </div>
 
       <div className="flex items-center gap-2">
-        <form onSubmit={onAddTeammateSubmit} className={`hidden xl:flex items-center gap-1 border rounded-lg p-1 text-xs ${theme === 'dark' ? 'bg-slate-955/30 border-slate-800/80' : 'bg-emerald-50/80 border-emerald-200'}`}>
+        <form onSubmit={onAddTeammateSubmit} className={`hidden xl:flex items-center gap-1 border rounded-lg p-1 text-xs ${theme === 'dark' ? 'bg-slate-900/30 border-slate-800/80' : 'bg-emerald-50/80 border-emerald-200'}`}>
           <input
             type="email"
             placeholder="Teammate's Email..."
