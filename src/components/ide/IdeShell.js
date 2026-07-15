@@ -3,15 +3,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sparkles, ChevronRight, FileCode, Plus, X, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch, ArrowLeft } from 'lucide-react';
-import { addDoc, arrayUnion, collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, arrayUnion, collection, doc, getCountFromServer, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import WorkspaceHeader from '../../app/workspace/_components/WorkspaceHeader';
+import Terminal from './Terminal';
 import {
   buildVercelFilesPayload,
   decodeBase64Utf8,
   filesAreIdentical,
   slugifyProjectName,
 } from '../../lib/ide-utils';
-import { getWorkspaceRouteState, WORKSPACE_PATH, LOGIN_PATH } from '../../app/workspace/_utils/routes';
+import { buildAdminProjectPath, buildWorkspaceProjectPath, getWorkspaceRouteState, WORKSPACE_PATH, LOGIN_PATH } from '../../app/workspace/_utils/routes';
 import { Toaster, toast } from 'react-hot-toast';
 
 import {
@@ -32,6 +33,16 @@ const escapeHtmlText = (value) => String(value || '').replace(/[&<>"']/g, (char)
   '"': '&quot;',
   "'": '&#39;'
 }[char]));
+
+const buildDefaultChatMessages = () => ([
+  {
+    id: 'welcome',
+    role: 'assistant',
+    content: 'Your AI response will appear here after you run a task.',
+    createdAt: 0,
+    turnId: 'welcome',
+  },
+]);
 
 const buildDefaultProjectFiles = (projectName, template) => {
   const safeProjectName = escapeHtmlText(projectName || 'Untitled Project');
@@ -141,6 +152,7 @@ export default function App() {
 
   // Admin and Hackathon Configuration States
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminLoading, setAdminLoading] = useState(true);
   const [hackathonActive, setHackathonActive] = useState(false);
   const [submissionsEnabled, setSubmissionsEnabled] = useState(false);
   const [globalHackathonProjects, setGlobalHackathonProjects] = useState([]);
@@ -161,6 +173,12 @@ export default function App() {
   // Workspace vs IDE View state
   const [currentProjectId, setCurrentProjectIdState] = useState(null);
   const [projects, setProjects] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [routeLookupProject, setRouteLookupProject] = useState(null);
+  const [routeLookupComplete, setRouteLookupComplete] = useState(false);
+  const [routeLookupError, setRouteLookupError] = useState('');
+  const [adminSubmissionsLoading, setAdminSubmissionsLoading] = useState(false);
+  const [adminSubmissionsResolved, setAdminSubmissionsResolved] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectTemplate, setNewProjectTemplate] = useState('html');
   const [workspaceError, setWorkspaceError] = useState('');
@@ -216,11 +234,12 @@ export default function App() {
   // Synchronized Reference Pointers to neutralize state closures in active threads
   const activeFileIdRef = useRef(activeFileId);
   const isInternalChangeRef = useRef(false);
+  const authBootstrapInFlightRef = useRef(false);
 
   // Layout & Console Utilities
   const [promptInput, setPromptInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [chatResponse, setChatResponse] = useState('Your AI response will appear here after you run a task.');
+  const [chatMessages, setChatMessages] = useState(buildDefaultChatMessages);
   const [consoleLogs, setConsoleLogs] = useState([
     'Ready. Your YouthDevs workspace is online.'
   ]);
@@ -233,10 +252,12 @@ export default function App() {
   const [leftWidth, setLeftWidth] = useState(240);
   const [centerWidth, setCenterWidth] = useState(600);
   const [footerHeight, setFooterHeight] = useState(180);
+  const [chatPanelWidth, setChatPanelWidth] = useState(50);
 
   const isResizingLeft = useRef(false);
   const isResizingCenter = useRef(false);
   const isResizingFooter = useRef(false);
+  const isResizingChatPanel = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
   const {
@@ -251,9 +272,16 @@ export default function App() {
   const activeProjectData = projects.find(p => p.id === currentProjectId);
   const routeProjectsSource = routeMode === 'admin-project' ? adminSubmissions : projects;
   const routeProject = (routeMode === 'project' || routeMode === 'admin-project')
-    ? routeProjectsSource.find((p) => slugifyProjectName(p.projectSlug || p.slug || p.name || p.id) === projectSlugFromRoute)
+    ? routeProjectsSource.find((p) => {
+      const routeKey = slugifyProjectName(projectSlugFromRoute);
+      return [p.id, p.projectSlug, p.slug, p.projectName, p.name]
+        .filter(Boolean)
+        .some((candidate) => slugifyProjectName(candidate) === routeKey);
+    })
     : null;
+  const resolvedRouteProject = routeProject || (routeMode === 'project' ? routeLookupProject : null);
   const canAccessAdminPanel = isAdmin || String(process.env.NEXT_PUBLIC_FORCE_ADMIN_PANEL).toLowerCase() === 'true' || !db;
+  const canListenToAdminCollections = isAdmin && !!db && isAdminRoute;
 
   // Detect if there are unsaved local modifications compared to the Firestore database
   const isDirty = activeProjectData && JSON.stringify(files) !== JSON.stringify(activeProjectData.files);
@@ -310,94 +338,157 @@ export default function App() {
     }
   };
 
-  // Custom setter that persists to sessionStorage so reload doesn't boot them to the workspace
+  // This is only for user-initiated project changes. Route effects update selection
+  // directly so a route never causes another route transition.
   const setCurrentProjectId = (id) => {
     setCurrentProjectIdState(id);
     if (id) {
       const targetProject = projects.find((project) => project.id === id);
-      const nextSlug = slugifyProjectName(targetProject?.slug || targetProject?.name || targetProject?.id || id);
+      // Use the Firestore document ID for newly opened projects. It is stable even
+      // when legacy projects have missing or inconsistent slug fields.
+      const nextSlug = targetProject?.id || slugifyProjectName(targetProject?.slug || targetProject?.name || id);
       sessionStorage.setItem('current-project-id', id);
       if (nextSlug) {
-        router.push(`/${nextSlug}`);
+        const targetPath = buildWorkspaceProjectPath(nextSlug);
+        if (pathname !== targetPath) router.push(targetPath);
       }
     } else {
       sessionStorage.removeItem('current-project-id');
-      router.push(WORKSPACE_PATH);
+      if (pathname !== WORKSPACE_PATH) router.push(WORKSPACE_PATH);
     }
   };
 
   useEffect(() => {
-    if (routeMode === 'root') {
-      if (!authLoading) {
-        router.replace(WORKSPACE_PATH);
-      }
+    if (authLoading) return;
+
+    const replace = (target) => {
+      if (pathname !== target) router.replace(target);
+    };
+    const clearActiveProject = () => {
+      if (currentProjectId) setCurrentProjectIdState(null);
+      sessionStorage.removeItem('current-project-id');
+    };
+
+    if (routeMode === 'root' || routeMode === 'invalid') {
+      replace(user ? WORKSPACE_PATH : LOGIN_PATH);
       return;
     }
-
     if (routeMode === 'login') {
-      if (currentProjectId) {
-        setCurrentProjectIdState(null);
-        sessionStorage.removeItem('current-project-id');
-      }
-      if (user && !authLoading) {
-        router.replace(WORKSPACE_PATH);
-      }
+      clearActiveProject();
+      if (user) replace(WORKSPACE_PATH);
       return;
     }
-
+    if (!user) {
+      // Keep project URLs stable while Firebase restores the current session.
+      // Redirecting here creates a /project -> /login -> /workspace loop when
+      // the auth listener briefly reports null during a route remount.
+      if (routeMode === 'project') return;
+      replace(LOGIN_PATH);
+      return;
+    }
     if (routeMode === 'workspace') {
-      if (currentProjectId) {
-        setCurrentProjectIdState(null);
-        sessionStorage.removeItem('current-project-id');
-      }
-      if (!user && !authLoading) {
-        router.replace(LOGIN_PATH);
-      }
+      clearActiveProject();
       return;
     }
-
-    if (routeMode === 'admin') {
-      if (!isAdmin && !authLoading) {
-        router.replace(WORKSPACE_PATH);
+    if (isAdminRoute) {
+      if (adminLoading) return;
+      if (!isAdmin) {
+        replace(WORKSPACE_PATH);
         return;
       }
-      if (currentProjectId) {
-        setCurrentProjectIdState(null);
-        sessionStorage.removeItem('current-project-id');
-      }
-      if (!user && !authLoading) {
-        router.replace('/login');
-      }
+      clearActiveProject();
+      if (routeMode === 'admin-project' && adminSubmissionsResolved && !routeProject) replace('/admin');
       return;
     }
+  }, [authLoading, adminLoading, adminSubmissionsLoading, adminSubmissionsResolved, currentProjectId, isAdmin, isAdminRoute, pathname, projectsLoading, resolvedRouteProject?.id, routeLookupComplete, routeMode, router, user]);
 
-    if (routeMode === 'admin-project') {
-      if (!isAdmin && !authLoading) {
-        router.replace(WORKSPACE_PATH);
-        return;
-      }
-      if (!user && !authLoading) {
-        router.replace('/login');
-        return;
-      }
-      if (routeProject && routeProject.id !== currentProjectId) {
-        setCurrentProjectIdState(routeProject.id);
-      }
-      return;
+  // Select a resolved project without changing the browser URL. Project routes
+  // must remain stable while Firestore and the IDE shell finish loading.
+  useEffect(() => {
+    if (routeMode !== 'project' || !resolvedRouteProject) return;
+    if (resolvedRouteProject.id !== currentProjectId) {
+      setCurrentProjectIdState(resolvedRouteProject.id);
+    }
+  }, [currentProjectId, resolvedRouteProject?.id, routeMode]);
+
+  // Resolve the URL directly before treating a project as missing. This covers
+  // legacy records whose membership query or slug fields are incomplete.
+  useEffect(() => {
+    let cancelled = false;
+
+    if (routeMode !== 'project' || !user || projectsLoading) {
+      setRouteLookupProject(null);
+      setRouteLookupError('');
+      setRouteLookupComplete(routeMode !== 'project' || !user);
+      return () => {
+        cancelled = true;
+      };
     }
 
-    if (routeMode === 'project') {
-      if (!user && !authLoading) {
-        router.replace(LOGIN_PATH);
-        return;
-      }
-      if (routeProject && routeProject.id !== currentProjectId) {
-        setCurrentProjectIdState(routeProject.id);
-      } else if (!routeProject && projects.length > 0 && !currentProjectId) {
-        router.replace(WORKSPACE_PATH);
-      }
+    if (routeProject) {
+      setRouteLookupProject(null);
+      setRouteLookupError('');
+      setRouteLookupComplete(true);
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [routeMode, routeProject?.id, user, authLoading, currentProjectId, router]);
+
+    const lookupProject = async () => {
+      let foundProject = null;
+      let lookupFailed = false;
+
+      if (db) {
+        try {
+          const directSnapshot = await getDoc(doc(db, 'projects', projectSlugFromRoute));
+          if (directSnapshot.exists()) {
+            foundProject = { id: directSnapshot.id, ...directSnapshot.data() };
+          }
+        } catch (error) {
+          // A slug is not a document ID, or the direct read is not permitted.
+          // Continue with the indexed legacy slug lookups below.
+        }
+
+        if (!foundProject) {
+          for (const field of ['slug', 'projectSlug']) {
+            try {
+              const snapshot = await getDocs(query(collection(db, 'projects'), where(field, '==', projectSlugFromRoute)));
+              if (!snapshot.empty) {
+                const projectSnapshot = snapshot.docs[0];
+                foundProject = { id: projectSnapshot.id, ...projectSnapshot.data() };
+                break;
+              }
+            } catch (error) {
+              lookupFailed = true;
+              console.error(`Project ${field} route lookup failed:`, error?.message || error);
+            }
+          }
+        }
+      }
+
+      if (!cancelled) {
+        setRouteLookupProject(foundProject);
+        setRouteLookupError(foundProject
+          ? ''
+          : lookupFailed
+            ? 'Project lookup is temporarily unavailable. Check your Firestore connection and try again.'
+            : 'This project could not be found for the current account.');
+        if (foundProject) {
+          setProjects((currentProjects) => currentProjects.some((project) => project.id === foundProject.id)
+            ? currentProjects
+            : [...currentProjects, foundProject]);
+        }
+        setRouteLookupComplete(true);
+      }
+    };
+
+    setRouteLookupComplete(false);
+    lookupProject();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [db, projectSlugFromRoute, projectsLoading, routeMode, routeProject?.id, user]);
 
   const handleDeployToVercel = async () => {
     if (isDeployingToVercel) return;
@@ -505,11 +596,8 @@ export default function App() {
       setGithubToken(savedGitToken);
     }
 
-    // Restore active workspace project after an automatic page reload
-    const savedProjectId = sessionStorage.getItem('current-project-id');
-    if (savedProjectId) {
-      setCurrentProjectIdState(savedProjectId);
-    }
+    // Project selection is restored from the URL, not session state. This avoids
+    // a stale selection briefly mounting the wrong terminal/editor after refresh.
   }, []);
 
   const toggleTheme = () => {
@@ -534,26 +622,57 @@ export default function App() {
     }
 
     const shouldAutoSignIn = routeMode !== 'login';
+    const allowAnonymousAuth = String(process.env.NEXT_PUBLIC_ENABLE_ANONYMOUS_AUTH).toLowerCase() === 'true';
+    authBootstrapInFlightRef.current = shouldAutoSignIn;
+
+    const finishAuthBootstrap = () => {
+      authBootstrapInFlightRef.current = false;
+      setAuthLoading(false);
+    };
+
     const authTimeout = setTimeout(() => {
       setAuthBootError('Auth bootstrap timed out. Opening sign-in screen.');
-      setAuthLoading(false);
+      finishAuthBootstrap();
     }, 8000);
 
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         try {
           await signInWithCustomToken(auth, __initial_auth_token);
+          if (auth.currentUser) {
+            finishAuthBootstrap();
+          }
         } catch (e) {
-          if (shouldAutoSignIn) {
-            await signInAnonymously(auth);
+          if (shouldAutoSignIn && allowAnonymousAuth) {
+            try {
+              await signInAnonymously(auth);
+              if (auth.currentUser) {
+                finishAuthBootstrap();
+              }
+            } catch (anonymousError) {
+              setAuthBootError('Auth service unavailable. Opening sign-in screen.');
+              finishAuthBootstrap();
+            }
+          } else {
+            setAuthBootError('Sign-in token was rejected. Please open the login screen.');
+            finishAuthBootstrap();
           }
         }
-      } else if (shouldAutoSignIn) {
+      } else if (shouldAutoSignIn && allowAnonymousAuth) {
         try {
           await signInAnonymously(auth);
+          if (auth.currentUser) {
+            finishAuthBootstrap();
+          }
         } catch (e) {
           setAuthBootError('Auth service unavailable. Opening sign-in screen.');
-          setAuthLoading(false);
+          finishAuthBootstrap();
+        }
+      } else if (shouldAutoSignIn) {
+        // Keep the app usable even when anonymous auth is disabled in Firebase.
+        finishAuthBootstrap();
+        if (!process.env.NEXT_PUBLIC_ENABLE_ANONYMOUS_AUTH) {
+          setAuthBootError('');
         }
       }
     };
@@ -563,11 +682,21 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setAuthLoading(false);
       if (!currentUser) {
-        setCurrentProjectId(null);
+        // Auth changes must not navigate. The route effect owns redirects.
+        setCurrentProjectIdState(null);
+        sessionStorage.removeItem('current-project-id');
         setProjects([]);
+        setProjectsLoading(false);
+        setIsAdmin(false);
+        setAdminLoading(false);
+        if (!authBootstrapInFlightRef.current) {
+          setAuthLoading(false);
+        }
+        return;
       }
+      authBootstrapInFlightRef.current = false;
+      setAuthLoading(false);
     });
     return () => {
       clearTimeout(authTimeout);
@@ -577,9 +706,13 @@ export default function App() {
 
   // Fetch User Projects, Admin privileges and Hackathon System Configurations
   useEffect(() => {
-    if (!user || !db) {
+    if (!db) {
       // Mock localized projects for offline testing when firebase config isn't supplied
       setIsAdmin(true); // Let's enable Admin mode by default in offline fallback mode for painless testing!
+      setAdminLoading(false);
+      setProjectsLoading(false);
+      setAdminSubmissionsLoading(false);
+      setAdminSubmissionsResolved(false);
       if (projects.length === 0) {
         setProjects([{
           id: 'local-demo-project',
@@ -610,7 +743,50 @@ export default function App() {
       return;
     }
 
+    if (!user) {
+      setIsAdmin(false);
+      setAdminLoading(false);
+      setProjects([]);
+      setProjectsLoading(false);
+      setAdminSubmissions([]);
+      setAdminSubmissionsLoading(false);
+      setAdminSubmissionsResolved(false);
+      return;
+    }
+
     const userProfileRef = doc(db, 'users', user.uid);
+    setProjectsLoading(true);
+    setAdminLoading(true);
+    setAdminSubmissionsResolved(false);
+    const bootListeners = async () => {
+      try {
+        const [profileSnap, hackathonSnap] = await Promise.all([
+          getDoc(userProfileRef),
+          getDoc(doc(db, 'system', 'hackathon')),
+        ]);
+
+        if (!profileSnap.exists()) {
+          await setDoc(userProfileRef, {
+            email: user.email || 'anonymous@youthdevs.me',
+            superchargeUses: 0,
+            cooldownEndTime: null,
+            isAdmin: false,
+          });
+        }
+
+        if (!hackathonSnap.exists()) {
+          await setDoc(doc(db, 'system', 'hackathon'), {
+            active: false,
+            submissionsEnabled: false,
+          });
+        }
+      } catch (err) {
+        console.warn('Firestore bootstrap step failed before listeners attached:', err?.message || err);
+      }
+    };
+
+    bootListeners();
+
     const unsubProfile = onSnapshot(userProfileRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -620,6 +796,7 @@ export default function App() {
         // Mark admin based on Firestore configurations
         setIsAdmin(data.isAdmin || false);
       } else {
+        setIsAdmin(false);
         try {
           await setDoc(userProfileRef, { email: user.email || 'anonymous@youthdevs.me', superchargeUses: 0, cooldownEndTime: null, isAdmin: false }, { merge: true });
         } catch (err) {
@@ -627,6 +804,11 @@ export default function App() {
         }
       }
       fetchTotalUsersCount();
+      setAdminLoading(false);
+    }, (error) => {
+      console.error('User profile listener failed:', error?.message || error);
+      setIsAdmin(false);
+      setAdminLoading(false);
     });
 
     // Subscribe to Hackathon Config Node globally
@@ -640,28 +822,53 @@ export default function App() {
         // Safe defaults initialization
         setDoc(hackathonConfigRef, { active: false, submissionsEnabled: false }).catch(() => { });
       }
+    }, (error) => {
+      console.error('Hackathon config listener failed:', error?.message || error);
     });
 
-    // TEAM ACCOMMODATION: Query all projects where user.uid is contained inside memberUids array
-    const q = query(collection(db, 'projects'), where('memberUids', 'array-contains', user.uid));
-    const unsubProjects = onSnapshot(q, (snapshot) => {
-      const projs = [];
-      snapshot.forEach(doc => projs.push({ id: doc.id, ...doc.data() }));
-      setProjects(projs);
-    });
+    // TEAM ACCOMMODATION: Match either the user's UID or their email so legacy projects stay reachable.
+    const userEmail = (user.email || '').trim().toLowerCase();
+    const unsubscribers = [];
+    const uidProjects = new Map();
+    const emailProjects = new Map();
+    const settledSources = new Set();
+    const requiredSources = userEmail ? 2 : 1;
+    const publishProjects = () => {
+      setProjects(Array.from(new Map([...uidProjects, ...emailProjects]).values()));
+    };
+    const applySnapshot = (source, target, snapshot) => {
+      target.clear();
+      snapshot.forEach((docSnap) => target.set(docSnap.id, { id: docSnap.id, ...docSnap.data() }));
+      publishProjects();
+      settledSources.add(source);
+      if (settledSources.size === requiredSources) setProjectsLoading(false);
+    };
+    const failSource = (source, error) => {
+      console.error('Project listener failed:', error?.message || error);
+      settledSources.add(source);
+      if (settledSources.size === requiredSources) setProjectsLoading(false);
+    };
+
+    const uidQuery = query(collection(db, 'projects'), where('memberUids', 'array-contains', user.uid));
+    unsubscribers.push(onSnapshot(uidQuery, (snapshot) => applySnapshot('uid', uidProjects, snapshot), (error) => failSource('uid', error)));
+
+    if (userEmail) {
+      const emailQuery = query(collection(db, 'projects'), where('memberEmails', 'array-contains', userEmail));
+      unsubscribers.push(onSnapshot(emailQuery, (snapshot) => applySnapshot('email', emailProjects, snapshot), (error) => failSource('email', error)));
+    }
 
     fetchTotalUsersCount();
 
     return () => {
       unsubProfile();
       unsubHackathon();
-      unsubProjects();
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, [user]);
 
   // Admin Live Projects Snapshot listener (Fetches hackathon-marked projects)
   useEffect(() => {
-    if (!canAccessAdminPanel || !db) return;
+    if (!canListenToAdminCollections) return;
 
     const projectsRef = collection(db, 'projects');
     const unsubAdminProjects = onSnapshot(projectsRef, (snapshot) => {
@@ -673,15 +880,23 @@ export default function App() {
         }
       });
       setGlobalHackathonProjects(allProjects);
+    }, (error) => {
+      console.error('Admin projects listener failed:', error?.message || error);
     });
 
     return () => unsubAdminProjects();
-  }, [canAccessAdminPanel]);
+  }, [canListenToAdminCollections]);
 
   // Admin submission snapshot listener (Dedicated Firestore collection for grading)
   useEffect(() => {
-    if (!canAccessAdminPanel || !db) return;
+    if (!canListenToAdminCollections) {
+      setAdminSubmissionsLoading(false);
+      setAdminSubmissionsResolved(false);
+      return;
+    }
 
+    setAdminSubmissionsLoading(true);
+    setAdminSubmissionsResolved(false);
     const submissionsRef = collection(db, 'adminSubmissions');
     const unsubAdminSubmissions = onSnapshot(submissionsRef, (snapshot) => {
       const submissions = [];
@@ -690,10 +905,16 @@ export default function App() {
       });
       submissions.sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
       setAdminSubmissions(submissions);
+      setAdminSubmissionsLoading(false);
+      setAdminSubmissionsResolved(true);
+    }, (error) => {
+      console.error('Admin submissions listener failed:', error?.message || error);
+      setAdminSubmissionsLoading(false);
+      setAdminSubmissionsResolved(true);
     });
 
     return () => unsubAdminSubmissions();
-  }, [canAccessAdminPanel]);
+  }, [canListenToAdminCollections]);
 
   // Fetch GitHub User parameters when token is parsed
   useEffect(() => {
@@ -845,10 +1066,63 @@ export default function App() {
           }
         }
       }
+    }, (error) => {
+      console.error('Project file listener failed:', error?.message || error);
     });
 
     return () => unsubProjectFiles();
   }, [user, currentProjectId, activeFileId, githubToken, projects]);
+
+  // Load the saved AI chat thread for the active project so the full conversation survives reloads.
+  useEffect(() => {
+    if (!currentProjectId || !db) {
+      setChatMessages(buildDefaultChatMessages());
+      return undefined;
+    }
+
+    const chatMessagesRef = collection(db, 'projects', currentProjectId, 'chatMessages');
+    const chatQuery = query(chatMessagesRef, orderBy('createdAt', 'asc'), limit(200));
+
+    const unsubChatMessages = onSnapshot(chatQuery, (snapshot) => {
+      const loadedMessages = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data() || {};
+        return {
+          id: docSnap.id,
+          role: data.role === 'user' ? 'user' : 'assistant',
+          content: typeof data.content === 'string' ? data.content : '',
+          createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
+          turnId: typeof data.turnId === 'string' ? data.turnId : docSnap.id,
+          pending: !!data.pending,
+          status: typeof data.status === 'string' ? data.status : '',
+        };
+      });
+
+      setChatMessages((current) => {
+        const pendingMessages = current.filter((message) => (
+          message.pending
+          && typeof message.turnId === 'string'
+          && message.turnId.startsWith(currentProjectId)
+        ));
+        const mergedMessages = [...loadedMessages];
+
+        pendingMessages.forEach((pendingMessage) => {
+          const hasCompletedMessage = mergedMessages.some(
+            (message) => message.turnId === pendingMessage.turnId && message.role === pendingMessage.role && !message.pending
+          );
+
+          if (!hasCompletedMessage && !mergedMessages.some((message) => message.turnId === pendingMessage.turnId && message.role === pendingMessage.role && message.pending)) {
+            mergedMessages.push(pendingMessage);
+          }
+        });
+
+        return mergedMessages.length > 0 ? mergedMessages : buildDefaultChatMessages();
+      });
+    }, () => {
+      setChatMessages(buildDefaultChatMessages());
+    });
+
+    return () => unsubChatMessages();
+  }, [currentProjectId, db]);
 
   // RUNTIME MONACO EDITOR SCRIPT LOADER (Bypasses compile-time dependencies perfectly)
   useEffect(() => {
@@ -982,9 +1256,15 @@ export default function App() {
       if (isResizingLeft.current) setLeftWidth(Math.max(180, Math.min(400, e.clientX)));
       if (isResizingCenter.current) setCenterWidth(Math.max(300, Math.min(window.innerWidth - leftWidth - 200, e.clientX - leftWidth)));
       if (isResizingFooter.current) setFooterHeight(Math.max(120, Math.min(500, window.innerHeight - e.clientY)));
+      if (isResizingChatPanel.current) {
+        setChatPanelWidth(Math.max(30, Math.min(70, (e.clientX / window.innerWidth) * 100)));
+      }
     };
     const handleMouseUp = () => {
-      isResizingLeft.current = false; isResizingCenter.current = false; isResizingFooter.current = false;
+      isResizingLeft.current = false;
+      isResizingCenter.current = false;
+      isResizingFooter.current = false;
+      isResizingChatPanel.current = false;
     };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
@@ -1017,7 +1297,10 @@ export default function App() {
       setProjects([...projects, newLocalProj]);
       setNewProjectName('');
       setNewProjectTemplate('html');
-      router.push(`/${localSlug || newLocalId}`);
+      const nextPath = buildWorkspaceProjectPath(localSlug || newLocalId);
+      if (pathname !== nextPath) {
+        router.push(nextPath);
+      }
       return;
     }
 
@@ -1091,7 +1374,7 @@ export default function App() {
         name: newProjectName.trim(),
         userId: user.uid,
         memberUids: [user.uid],
-        memberEmails: [user.email || 'anonymous'],
+        memberEmails: [(user.email || 'anonymous').trim().toLowerCase()],
         presence: {},
         template: newProjectTemplate,
         files: defaultFiles, // Always initialize defaultFiles in Firestore so non-GitHub teammates can see them immediately!
@@ -1108,7 +1391,10 @@ export default function App() {
       setNewProjectName('');
       setNewProjectTemplate('html');
       setUseGithubForNewProject(false);
-      router.push(`/${newProjectSlug || cleanedRepoName || 'project'}`);
+      const nextPath = buildWorkspaceProjectPath(newProjectSlug || cleanedRepoName || 'project');
+      if (pathname !== nextPath) {
+        router.push(nextPath);
+      }
     } catch (err) {
       console.error(err);
       setWorkspaceError(err.message || 'Permission denied. Make sure your Firestore rules match your project schema!');
@@ -1526,16 +1812,41 @@ export default function App() {
   // --- TASK PIPELINE RUNNER ---
   const handleAgenticVibeSubmit = async (e) => {
     e.preventDefault();
-    if (!promptInput.trim() || isAiLoading || !currentProjectId) return;
+    const userMessage = promptInput.trim();
+    if (!userMessage || isAiLoading || !currentProjectId) return;
 
     if (isSupercharged && cooldownEndTime) {
       alert(`Supercharge lock active. Wait ${secondsLeft} seconds.`);
       return;
     }
 
+    const turnId = `${currentProjectId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const userMessageEntry = {
+      role: 'user',
+      content: userMessage,
+      createdAt: Date.now(),
+      turnId,
+      status: 'sent',
+      authorUid: user?.uid || null,
+      authorEmail: user?.email || null,
+    };
+    const pendingAssistantEntry = {
+      id: `${turnId}-pending`,
+      role: 'assistant',
+      content: 'Thinking through your request...',
+      createdAt: Date.now(),
+      turnId,
+      pending: true,
+      status: 'pending',
+    };
+
     setIsAiLoading(true);
-    setChatResponse('Thinking through your request...');
-    setConsoleLogs([`TASK: "${promptInput}"`, 'SYSTEM: Preparing workspace context...']);
+    setPromptInput('');
+    setChatMessages((current) => {
+      const baseMessages = current.length === 1 && current[0]?.id === 'welcome' ? [] : current;
+      return [...baseMessages, userMessageEntry, pendingAssistantEntry];
+    });
+    setConsoleLogs([`TASK: "${userMessage}"`, 'SYSTEM: Preparing workspace context...']);
 
     const keepStreaming = { current: true };
     const streamId = triggerMatrixTerminalStream(keepStreaming);
@@ -1543,13 +1854,26 @@ export default function App() {
     const repositoryStructure = files.map(f => ({ name: f.name, language: f.language }));
     const selectedContextContents = files.filter(f => selectedContextIds.includes(f.id)).map(f => ({ name: f.name, content: f.content }));
     const targetModel = isSupercharged ? 'gemini-3.5-flash' : 'gemini-3.1-flash-lite';
+    const chatMessagesRef = db && currentProjectId
+      ? collection(db, 'projects', currentProjectId, 'chatMessages')
+      : null;
+    let chatHistoryWriteEnabled = !!chatMessagesRef;
+
+    if (chatMessagesRef) {
+      try {
+        await addDoc(chatMessagesRef, userMessageEntry);
+      } catch (error) {
+        chatHistoryWriteEnabled = false;
+        console.warn('Failed to persist user chat message:', error?.message || error);
+      }
+    }
 
     try {
       const response = await fetch('/api/vibe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          instruction: promptInput,
+          instruction: userMessage,
           repositoryStructure,
           contextFiles: selectedContextContents,
           modelSelection: targetModel
@@ -1559,13 +1883,60 @@ export default function App() {
       const data = await response.json();
       keepStreaming.current = false;
       clearInterval(streamId);
-      setChatResponse(
-        typeof data.chatResponse === 'string' && data.chatResponse.trim()
-          ? data.chatResponse.trim()
-          : typeof data.error === 'string' && data.error.trim()
-            ? data.error.trim()
-            : 'I finished the task, but the model did not return a readable explanation.'
-      );
+      const assistantMessage = typeof data.chatResponse === 'string' && data.chatResponse.trim()
+        ? data.chatResponse.trim()
+        : typeof data.error === 'string' && data.error.trim()
+          ? data.error.trim()
+          : 'I finished the task, but the model did not return a readable explanation.';
+
+      setChatMessages((current) => {
+        let replaced = false;
+        const nextMessages = current.map((message) => {
+          if (message.turnId === turnId && message.pending && message.role === 'assistant') {
+            replaced = true;
+            return {
+              ...message,
+              content: assistantMessage,
+              pending: false,
+              status: 'complete',
+              createdAt: Date.now(),
+            };
+          }
+
+          return message;
+        });
+
+        if (!replaced) {
+          nextMessages.push({
+            id: `${turnId}-assistant`,
+            role: 'assistant',
+            content: assistantMessage,
+            createdAt: Date.now(),
+            turnId,
+            pending: false,
+            status: 'complete',
+          });
+        }
+
+        return nextMessages;
+      });
+
+      if (chatHistoryWriteEnabled && chatMessagesRef) {
+        try {
+          await addDoc(chatMessagesRef, {
+            role: 'assistant',
+            content: assistantMessage,
+            createdAt: Date.now(),
+            turnId,
+            status: data.error ? 'error' : 'complete',
+            authorUid: user?.uid || null,
+            authorEmail: user?.email || null,
+            modelSelection: targetModel,
+          });
+        } catch (error) {
+          console.warn('Failed to persist assistant chat message:', error?.message || error);
+        }
+      }
 
       if (data.filePatches && Array.isArray(data.filePatches)) {
         let updatedFilesList = [...files];
@@ -1613,22 +1984,62 @@ export default function App() {
         }
 
         // Apply AI changes immediately without forcing a commit prompt.
-        const aiSummary = promptInput.trim()
-          ? `AI update: ${promptInput.trim().slice(0, 72)}${promptInput.trim().length > 72 ? '...' : ''}`
+        const aiSummary = userMessage
+          ? `AI update: ${userMessage.slice(0, 72)}${userMessage.length > 72 ? '...' : ''}`
           : 'AI update';
         await syncFilesToWorkspace(updatedFilesList, aiSummary, { skipGitHub: false });
       } else {
         setConsoleLogs(prev => [...prev, `CRITICAL: Compilation failed. ${data.error || 'Check server configuration structure.'}`]);
-        if (typeof data.chatResponse === 'string' && data.chatResponse.trim()) {
-          setChatResponse(data.chatResponse.trim());
-        } else if (typeof data.error === 'string' && data.error.trim()) {
-          setChatResponse(data.error.trim());
-        }
       }
     } catch (err) {
       keepStreaming.current = false; clearInterval(streamId);
       setConsoleLogs(prev => [...prev, 'CRITICAL: Engine compilation network failure.']);
-      setChatResponse('I hit a network error while trying to complete your request. Please try again.');
+      const failureMessage = 'I hit a network error while trying to complete your request. Please try again.';
+      setChatMessages((current) => {
+        let replaced = false;
+        const nextMessages = current.map((message) => {
+          if (message.turnId === turnId && message.pending && message.role === 'assistant') {
+            replaced = true;
+            return {
+              ...message,
+              content: failureMessage,
+              pending: false,
+              status: 'error',
+              createdAt: Date.now(),
+            };
+          }
+
+          return message;
+        });
+
+        if (!replaced) {
+          nextMessages.push({
+            id: `${turnId}-assistant-error`,
+            role: 'assistant',
+            content: failureMessage,
+            createdAt: Date.now(),
+            turnId,
+            pending: false,
+            status: 'error',
+          });
+        }
+
+        return nextMessages;
+      });
+      if (chatHistoryWriteEnabled && chatMessagesRef) {
+        addDoc(chatMessagesRef, {
+          role: 'assistant',
+          content: failureMessage,
+          createdAt: Date.now(),
+          turnId,
+          status: 'error',
+          authorUid: user?.uid || null,
+          authorEmail: user?.email || null,
+          modelSelection: targetModel,
+        }).catch((error) => {
+          console.warn('Failed to persist failed assistant chat message:', error?.message || error);
+        });
+      }
       console.error(err);
     } finally {
       setIsAiLoading(false);
@@ -1782,8 +2193,17 @@ export default function App() {
 
   if (routeMode === 'project' && !currentProjectId) {
     return (
-      <div className={`h-screen w-screen flex items-center justify-center font-mono text-xs ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#eef7f1] text-emerald-700'}`}>
-        Resolving project workspace...
+      <div className={`h-screen w-screen flex flex-col gap-4 items-center justify-center font-mono text-xs px-6 text-center ${theme === 'dark' ? 'bg-[#050b08] text-emerald-300' : 'bg-[#eef7f1] text-emerald-700'}`}>
+        <span>{routeLookupComplete && routeLookupError ? routeLookupError : 'Resolving project workspace...'}</span>
+        {routeLookupComplete && routeLookupError && (
+          <button
+            type="button"
+            onClick={() => router.push(WORKSPACE_PATH)}
+            className="rounded-lg border border-emerald-500/40 px-3 py-2 text-[11px] text-emerald-300 transition hover:bg-emerald-500/10"
+          >
+            Return to workspace
+          </button>
+        )}
       </div>
     );
   }
@@ -1810,7 +2230,7 @@ export default function App() {
       <div className={`flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
         <Toaster />        <header className="flex h-14 items-center justify-between px-4 border-b z-10 shrink-0 transition-colors border-emerald-900/25 bg-[#07120c]/70 backdrop-blur-md">
           <div className="flex items-center gap-3 max-w-[70%] overflow-hidden">
-            <button onClick={() => router.push('/admin')} className={`p-1.5 rounded-lg transition-colors shrink-0 ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-emerald-50 text-emerald-700 hover:text-emerald-900'}`} title="Return to Admin Dashboard">
+            <button onClick={() => { if (pathname !== '/admin') router.push('/admin'); }} className={`p-1.5 rounded-lg transition-colors shrink-0 ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-emerald-50 text-emerald-700 hover:text-emerald-900'}`} title="Return to Admin Dashboard">
               <ArrowLeft size={14} />
             </button>
             <div className={`h-5 w-px shrink-0 ${theme === 'dark' ? 'bg-slate-800' : 'bg-emerald-200'}`} />
@@ -1922,7 +2342,10 @@ export default function App() {
             {/* ADMIN ACCESS CONTEXT SWITCHER TRIGGER BUTTON */}
             {canAccessAdminPanel && (
               <button
-                onClick={() => router.push(isAdminRoute ? WORKSPACE_PATH : '/admin')}
+                onClick={() => {
+                  const nextPath = isAdminRoute ? WORKSPACE_PATH : '/admin';
+                  if (pathname !== nextPath) router.push(nextPath);
+                }}
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold border hover:scale-105 transition-all ${isAdminRoute
                   ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
                   : theme === 'dark' ? 'bg-[#08140d] border-emerald-900/30 text-slate-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
@@ -2080,16 +2503,19 @@ export default function App() {
 
                     <div className="flex gap-2">
                       <button
-                        onClick={() => {
-                          const nextSlug = slugifyProjectName(proj.projectSlug || proj.slug || proj.projectName || proj.name || proj.id || '');
-                          if (!nextSlug) return;
-                          setSelectedAdminProjectFiles(null);
-                          setAdminActiveFileName('');
-                          setAdminActiveFileContent('');
-                          router.push(`/admin/${nextSlug}`);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors"
-                      >
+                      onClick={() => {
+                        const nextSlug = slugifyProjectName(proj.projectSlug || proj.slug || proj.projectName || proj.name || proj.id || '');
+                        if (!nextSlug) return;
+                        setSelectedAdminProjectFiles(null);
+                        setAdminActiveFileName('');
+                        setAdminActiveFileContent('');
+                        const nextPath = buildAdminProjectPath(nextSlug);
+                        if (pathname !== nextPath) {
+                          router.push(nextPath);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors"
+                    >
                         <FileSearch size={13} />
                         View Files
                       </button>
@@ -2210,16 +2636,10 @@ export default function App() {
                   <div
                     key={proj.id}
                     onClick={() => {
-                      const nextSlug = slugifyProjectName(proj.slug || proj.name || proj.id || '');
-                      if (proj.id) {
-                        sessionStorage.setItem('current-project-id', proj.id);
-                      }
                       setFiles([]);
                       setActiveFileId('');
                       setInviteStatus('');
-                      if (nextSlug) {
-                        router.push(`/${nextSlug}`);
-                      }
+                      setCurrentProjectId(proj.id);
                     }}
                     className={`p-4 border rounded-xl cursor-pointer transition-all group relative ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-emerald-500/40 text-slate-300' : 'bg-white border-emerald-200 hover:border-emerald-500/45 text-slate-700 shadow-sm hover:shadow'}`}
                   >
@@ -2525,72 +2945,82 @@ export default function App() {
       <div className={`h-1.5 w-full cursor-ns-resize bg-transparent hover:bg-emerald-500/40 transition-colors z-20 border-t ${theme === 'dark' ? 'border-emerald-900/25' : 'border-emerald-200'}`} onMouseDown={() => { isResizingFooter.current = true; }} />
 
       {/* FOOTER INTERACT CONSOLE */}
-      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-4 grid grid-cols-1 lg:grid-cols-[1.1fr_1fr_1.1fr] gap-4 shrink-0 z-10 overflow-hidden transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-200 bg-white/90'}`}>
-        <div className="flex flex-col min-w-0 h-full">
-          <div className={`flex items-center gap-1.5 mb-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
-            <Sparkles size={13} className={isAiLoading ? "animate-spin text-emerald-300" : ""} />
-            <span className="text-[11px] font-bold uppercase tracking-wider">Task Terminal</span>
+      <footer style={{ height: `${footerHeight}px` }} className={`border-t p-2 grid grid-cols-1 lg:flex gap-2 shrink-0 z-10 overflow-y-auto overflow-x-hidden custom-scrollbar transition-colors ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/70 backdrop-blur-md' : 'border-emerald-200 bg-white/90'}`}>
+        <section style={{ flexBasis: `${chatPanelWidth}%` }} className={`flex min-h-[150px] flex-col min-w-0 h-full overflow-hidden rounded-lg border ${theme === 'dark' ? 'border-emerald-900/25 bg-[#050b08]/95 text-slate-100' : 'border-emerald-200 bg-white text-slate-900'}`}>
+          <div className={`flex items-center justify-between gap-3 border-b px-3 py-2 ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/80' : 'border-emerald-100 bg-slate-50'}`}>
+            <div className={`text-[11px] font-black uppercase tracking-[0.28em] ${theme === 'dark' ? 'text-emerald-300/90' : 'text-emerald-700'}`}>AI Chat</div>
+            {isAiLoading && (
+              <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                writing
+              </span>
+            )}
           </div>
-          <form onSubmit={handleAgenticVibeSubmit} className={`flex-1 flex items-stretch gap-2 border rounded-xl p-2 transition-all ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 focus-within:border-emerald-500/60' : 'bg-white border-emerald-200 focus-within:border-emerald-500/60'}`}>
-            <textarea value={promptInput} onChange={e => setPromptInput(e.target.value)} disabled={isAiLoading} placeholder={cooldownEndTime ? "Boost mode cooling down..." : "Describe the change you want made..."} className={`flex-1 bg-transparent border-none text-xs focus:outline-none resize-none p-1 custom-scrollbar leading-relaxed ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-700 placeholder-slate-400'}`} />
-            <button type="submit" disabled={isAiLoading || !promptInput.trim()} className="self-end flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition shrink-0 shadow-lg shadow-emerald-950/20">Run <ChevronRight size={12} /></button>
-          </form>
-        </div>
 
-        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-200'}`}>
-          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>
-            <div className="flex items-center gap-1.5"><Sparkles size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Chat Response</span></div>
-            {isAiLoading && <span className="text-[9px] font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/50 px-1.5 py-0.5 rounded-md">AI writing</span>}
-          </div>
-          <div className={`flex-1 border rounded-xl p-3 text-xs leading-relaxed overflow-y-auto custom-scrollbar shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-200' : 'bg-white border-emerald-200 text-slate-700'}`}>
-            <div className="whitespace-pre-wrap">
-              {chatResponse}
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3">
+            <div className="flex flex-col gap-3">
+              {chatMessages.map((message, index) => {
+                const isUser = message.role === 'user';
+                const isPending = message.pending && message.role === 'assistant';
+                const bubbleClasses = isUser
+                  ? 'ml-auto rounded-br-md bg-emerald-500 text-white shadow-lg shadow-emerald-950/20'
+                  : `rounded-bl-md border ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c] text-slate-100 shadow-black/20' : 'border-emerald-200 bg-slate-50 text-slate-700 shadow-black/5'}`;
+
+                return (
+                  <div key={message.id || `${message.turnId}-${index}`} className={isUser ? 'flex justify-end' : 'flex justify-start'}>
+                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-left text-xs shadow-lg ${bubbleClasses}`}>
+                      <div className={`mb-1 text-[9px] font-bold uppercase tracking-[0.24em] ${isUser ? 'text-emerald-100/80' : 'text-emerald-300/90'}`}>
+                        {isUser ? 'You' : 'AI'}
+                        {isPending ? ' · waiting' : ''}
+                      </div>
+                      <div className="whitespace-pre-wrap leading-relaxed">
+                        {message.content || (isUser ? 'Ask the assistant to modify your workspace...' : 'Your AI response will appear here after you run a task.')}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </div>
 
-        <div className={`flex flex-col min-w-0 h-full border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-4 ${theme === 'dark' ? 'border-emerald-900/20' : 'border-emerald-200'}`}>
-          <div className={`flex items-center justify-between mb-1.5 shrink-0 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>
-            <div className="flex items-center gap-1.5"><FileCode size={13} /><span className="text-[11px] font-bold uppercase tracking-wider">Render Options</span></div>
-            {lastModelUsed && <span className="text-[9px] font-mono font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/50 px-1.5 py-0.5 rounded-md">{lastModelUsed}</span>}
-          </div>
-          <div className={`flex-1 border rounded-xl p-3 text-xs overflow-y-auto custom-scrollbar flex flex-col gap-3 shadow-inner ${theme === 'dark' ? 'bg-[#050b08] border-emerald-900/30 text-slate-300' : 'bg-white border-emerald-200 text-slate-700'}`}>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Preview Renderer</span>
-              <select
-                value={renderMode}
-                onChange={(e) => {
-                  const nextMode = e.target.value;
-                  setRenderMode(nextMode);
-                  setPreviewHtml('');
-                  setPreviewUrl('');
-                  setPreviewStatus(nextMode === 'html'
-                    ? 'HTML preview renders the current workspace in the iframe.'
-                    : 'Next.js preview will run the workspace with npm run dev.');
-                }}
-                className={`w-full rounded-lg border px-3 py-2 text-xs font-bold outline-none transition-colors focus:border-emerald-500 ${theme === 'dark' ? 'border-emerald-900/35 bg-[#07120c] text-slate-100' : 'border-emerald-200 bg-white text-slate-700'}`}
+          <form onSubmit={handleAgenticVibeSubmit} className={`border-t px-0 py-1 ${theme === 'dark' ? 'border-emerald-900/20 bg-[#07120c]/80' : 'border-emerald-100 bg-slate-50'}`}>
+            <div className={`flex items-end gap-2 rounded-2xl border p-2 transition-all ${theme === 'dark' ? 'border-emerald-900/30 bg-[#050b08] focus-within:border-emerald-500/60' : 'border-emerald-200 bg-white focus-within:border-emerald-500/60'}`}>
+              <textarea
+                value={promptInput}
+                onChange={e => setPromptInput(e.target.value)}
+                disabled={isAiLoading}
+                placeholder={cooldownEndTime ? 'Boost mode cooling down...' : 'Message the assistant...'}
+                className={`min-h-[56px] flex-1 resize-none border-none bg-transparent p-2 text-xs focus:outline-none ${theme === 'dark' ? 'text-slate-100 placeholder-slate-500' : 'text-slate-700 placeholder-slate-400'}`}
+              />
+              <button
+                type="submit"
+                disabled={isAiLoading || !promptInput.trim()}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-800"
               >
-                <option value="html">HTML</option>
-                <option value="nextjs">Next.js (npm run dev)</option>
-              </select>
-            </label>
-
-            <div className={`rounded-lg border p-3 ${theme === 'dark' ? 'border-emerald-900/25 bg-[#07120c]/70' : 'border-emerald-200 bg-emerald-50/70'}`}>
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</div>
-              <div className={`text-[11px] leading-relaxed ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>{previewStatus}</div>
+                Send
+                <ChevronRight size={12} />
+              </button>
             </div>
+          </form>
+        </section>
 
-            <button
-              type="button"
-              onClick={refreshSandboxPreview}
-              disabled={isPreviewLoading || files.length === 0}
-              className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-[11px] font-bold text-white shadow-md shadow-emerald-950/20 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-800"
-            >
-              <Zap size={12} className={isPreviewLoading ? 'animate-spin' : ''} />
-              {isPreviewLoading ? 'Rendering Preview' : `Render ${renderMode === 'html' ? 'HTML' : 'Next.js'}`}
-            </button>
+        <div
+          className={`hidden lg:block w-1 shrink-0 cursor-ew-resize rounded-full transition-colors ${theme === 'dark' ? 'bg-emerald-900/40 hover:bg-emerald-400/70' : 'bg-emerald-200 hover:bg-emerald-500'}`}
+          onMouseDown={() => { isResizingChatPanel.current = true; }}
+          role="separator"
+          aria-label="Resize AI chat and terminal"
+          aria-orientation="vertical"
+        />
+
+        <section className={`flex min-h-[150px] flex-1 flex-col min-w-0 h-full overflow-hidden rounded-lg border ${theme === 'dark' ? 'border-emerald-900/25 bg-[#050b08] text-slate-100' : 'border-emerald-200 bg-white text-slate-900'}`}>
+          <div className="flex-1 min-h-0 p-2">
+            <Terminal
+              className="h-full min-h-0"
+              title="Workspace Terminal"
+              projectId={currentProjectId}
+              projectData={activeProjectData}
+            />
           </div>
-        </div>
+        </section>
       </footer>
 
       {/* CUSTOM COMMIT CHANGE POP-UP MODAL UI (NO WINDOW ALERTS USED) */}

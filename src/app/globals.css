@@ -41,6 +41,10 @@ html, body, #__next {
   background-color: #ffffff !important;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 10px;
   height: 10px;

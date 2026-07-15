@@ -1,7 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -16,30 +15,82 @@ service cloud.firestore {
       return isAuthenticated() &&
         exists(/databases/$(database)/documents/projects/$(projectId)) &&
         get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids != null &&
-        request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids;
+        (
+          request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids ||
+          (
+            request.auth.token.email != null &&
+            get(/databases/$(database)/documents/projects/$(projectId)).data.memberEmails != null &&
+            request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.memberEmails
+          )
+        );
+    }
+
+    function isPresenceOnlyUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['presence']);
     }
 
     match /users/{userId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
-      allow read: if isAdmin();
-      allow list: if isAuthenticated();
+      // The IDE queries this collection by email for teammate invites and counts users globally.
+      allow read: if isAuthenticated();
+
+      // Users can initialize and update their own profile doc, but only admins can change admin status.
+      allow create: if isAuthenticated()
+        && request.auth.uid == userId
+        && request.resource.data.isAdmin == false;
+
+      allow update: if isAdmin() || (
+        isAuthenticated()
+        && request.auth.uid == userId
+        // Let self-service updates change usage counters / cooldown state without letting users elevate privileges.
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['email', 'isAdmin'])
+      );
+
+      allow delete: if isAdmin();
     }
 
     match /system/{documentId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+
+      // Allow the app to bootstrap the hackathon config doc once, but lock ongoing changes to admins.
+      allow create: if isAuthenticated()
+        && documentId == 'hackathon'
+        && !exists(/databases/$(database)/documents/system/hackathon)
+        && request.resource.data.active is bool
+        && request.resource.data.submissionsEnabled is bool;
+
+      allow update, delete: if isAdmin();
     }
 
     match /projects/{projectId} {
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid
+        && request.auth.uid in request.resource.data.memberUids;
 
-      allow read: if isAuthenticated() && (
-        isAdmin() ||
-        (resource.data.memberUids != null && request.auth.uid in resource.data.memberUids) ||
-        resource.data.isHackathonProject == true
+      // Collection queries are used to build the workspace project list. Direct
+      // project reads are restricted to the project team or an administrator.
+      allow list: if isAuthenticated();
+      allow get: if isAdmin() || isProjectMember(projectId);
+
+      allow update: if isAdmin() || (
+        isProjectMember(projectId)
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.slug == resource.data.slug
+      ) || (
+        isAuthenticated() && isPresenceOnlyUpdate()
       );
 
-      allow update, delete: if isAdmin() || isProjectMember(projectId);
+      allow delete: if isAdmin() || request.auth.uid == resource.data.userId;
+    }
+
+    match /projects/{projectId}/chatMessages/{messageId} {
+      allow read: if isAdmin() || isProjectMember(projectId);
+
+      allow create: if isProjectMember(projectId)
+        && request.resource.data.role in ['user', 'assistant']
+        && request.resource.data.content is string
+        && request.resource.data.turnId is string;
+
+      allow update, delete: if isAdmin();
     }
 
     match /adminSubmissions/{projectId} {

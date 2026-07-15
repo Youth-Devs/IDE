@@ -16,6 +16,7 @@ import { WORKSPACE_PATH } from '../workspace/_utils/routes';
 
 export default function LoginPage() {
   const router = useRouter();
+  const [isMounted, setIsMounted] = useState(false);
   const [theme, setTheme] = useState('dark');
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -25,6 +26,7 @@ export default function LoginPage() {
   useEffect(() => {
     const savedTheme = localStorage.getItem('ide-theme');
     if (savedTheme) setTheme(savedTheme);
+    setIsMounted(true);
   }, []);
 
   useEffect(() => {
@@ -94,6 +96,12 @@ export default function LoginPage() {
       setAuthError(error.message);
     }
   };
+
+  if (!isMounted) {
+    return (
+      <div className="h-screen w-screen bg-[#050b08]" aria-hidden="true" />
+    );
+  }
 
   return (
     <AuthScreen
