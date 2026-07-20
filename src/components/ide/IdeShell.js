@@ -382,7 +382,7 @@ export default function App() {
       // Keep project URLs stable while Firebase restores the current session.
       // Redirecting here creates a /project -> /login -> /workspace loop when
       // the auth listener briefly reports null during a route remount.
-      if (routeMode === 'project') return;
+      if (routeMode === 'project' || routeMode === 'admin' || routeMode === 'admin-project') return;
       replace(LOGIN_PATH);
       return;
     }
@@ -2335,7 +2335,7 @@ export default function App() {
         <header className={`h-14 border-b px-6 flex items-center justify-between transition-colors ${theme === 'dark' ? 'border-emerald-900/30 bg-[#07120c]/70' : 'border-emerald-200 bg-white/80'}`}>
           <div className="flex items-center gap-3">
             <div className="h-7 w-7 bg-emerald-600 rounded-md flex items-center justify-center font-black text-sm text-white shadow-md shadow-emerald-950/20">Y</div>
-            <span className={`text-xs font-bold uppercase tracking-wider ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>YouthDevs Central Hub</span>
+            <span className={`text-xs font-bold uppercase tracking-widest ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>YouthDevs Central Hub</span>
           </div>
           <div className="flex items-center gap-4">
 
