@@ -280,8 +280,11 @@ export default function App() {
     })
     : null;
   const resolvedRouteProject = routeProject || (routeMode === 'project' ? routeLookupProject : null);
-  const canAccessAdminPanel = isAdmin || String(process.env.NEXT_PUBLIC_FORCE_ADMIN_PANEL).toLowerCase() === 'true' || !db;
-  const canListenToAdminCollections = isAdmin && !!db && isAdminRoute;
+  // The current Firestore rules grant admin access to authenticated users.
+  // Keep the client-side route gate consistent with that policy instead of
+  // blocking /admin on a profile flag that is initialized to false.
+  const canAccessAdminPanel = !!user || String(process.env.NEXT_PUBLIC_FORCE_ADMIN_PANEL).toLowerCase() === 'true' || !db;
+  const canListenToAdminCollections = canAccessAdminPanel && !!db && isAdminRoute;
 
   // Detect if there are unsaved local modifications compared to the Firestore database
   const isDirty = activeProjectData && JSON.stringify(files) !== JSON.stringify(activeProjectData.files);
@@ -379,11 +382,14 @@ export default function App() {
       return;
     }
     if (!user) {
-      // Keep project URLs stable while Firebase restores the current session.
-      // Redirecting here creates a /project -> /login -> /workspace loop when
-      // the auth listener briefly reports null during a route remount.
-      if (routeMode === 'project' || routeMode === 'admin' || routeMode === 'admin-project') return;
-      replace(LOGIN_PATH);
+      // Preserve the protected destination so login can return the user to the
+      // page they originally requested. Firebase auth has finished booting at
+      // this point, so leaving the protected shell mounted only shows a dead
+      // "Opening sign-in screen" state and can trigger redirect loops.
+      const nextPath = pathname && pathname !== LOGIN_PATH
+        ? `${LOGIN_PATH}?next=${encodeURIComponent(pathname)}`
+        : LOGIN_PATH;
+      replace(nextPath);
       return;
     }
     if (routeMode === 'workspace') {
@@ -392,7 +398,7 @@ export default function App() {
     }
     if (isAdminRoute) {
       if (adminLoading) return;
-      if (!isAdmin) {
+      if (!canAccessAdminPanel) {
         replace(WORKSPACE_PATH);
         return;
       }
@@ -400,7 +406,7 @@ export default function App() {
       if (routeMode === 'admin-project' && adminSubmissionsResolved && !routeProject) replace('/admin');
       return;
     }
-  }, [authLoading, adminLoading, adminSubmissionsLoading, adminSubmissionsResolved, currentProjectId, isAdmin, isAdminRoute, pathname, projectsLoading, resolvedRouteProject?.id, routeLookupComplete, routeMode, router, user]);
+  }, [authLoading, adminLoading, adminSubmissionsLoading, adminSubmissionsResolved, canAccessAdminPanel, currentProjectId, isAdmin, isAdminRoute, pathname, projectsLoading, resolvedRouteProject?.id, routeLookupComplete, routeMode, router, user]);
 
   // Select a resolved project without changing the browser URL. Project routes
   // must remain stable while Firestore and the IDE shell finish loading.

@@ -23,6 +23,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
+  const getPostAuthPath = () => {
+    const nextPath = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('next')
+      : null;
+    // Only allow same-origin absolute paths. In particular, reject //host
+    // values so the login redirect cannot become an open redirect.
+    return nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')
+      ? nextPath
+      : WORKSPACE_PATH;
+  };
+
   useEffect(() => {
     const savedTheme = localStorage.getItem('ide-theme');
     if (savedTheme) setTheme(savedTheme);
@@ -33,7 +44,7 @@ export default function LoginPage() {
     if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
-        router.replace(WORKSPACE_PATH);
+        router.replace(getPostAuthPath());
       }
     });
     return unsubscribe;
@@ -59,7 +70,7 @@ export default function LoginPage() {
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
-      router.replace(WORKSPACE_PATH);
+      router.replace(getPostAuthPath());
     } catch (error) {
       setAuthError(error.message.replace('Firebase: ', ''));
     }
@@ -74,7 +85,7 @@ export default function LoginPage() {
 
     try {
       await signInWithPopup(auth, googleProvider);
-      router.replace(WORKSPACE_PATH);
+      router.replace(getPostAuthPath());
     } catch (error) {
       setAuthError(error.message);
     }
@@ -91,7 +102,7 @@ export default function LoginPage() {
       const provider = new GithubAuthProvider();
       provider.addScope('repo');
       await signInWithPopup(auth, provider);
-      router.replace(WORKSPACE_PATH);
+      router.replace(getPostAuthPath());
     } catch (error) {
       setAuthError(error.message);
     }
