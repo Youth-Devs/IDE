@@ -196,6 +196,7 @@ export default function App() {
   const [deployError, setDeployError] = useState('');
   const [deployUrl, setDeployUrl] = useState('');
   const [deployDomainMode, setDeployDomainMode] = useState('');
+  const [skipCourseSubmittingProjectId, setSkipCourseSubmittingProjectId] = useState('');
 
   // Teammate Invitation Input State
   const [teammateEmailInput, setTeammateEmailInput] = useState('');
@@ -559,6 +560,45 @@ export default function App() {
     anchor.click();
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const submitProjectToSkipCourse = async (projectToSubmit, toastMessage = 'Submitting to SkipCourse...') => {
+    if (!user) throw new Error('You must be signed in to submit to SkipCourse.');
+
+    const submittedFiles = Array.isArray(projectToSubmit?.files)
+      ? projectToSubmit.files.map((file) => ({ ...file }))
+      : [];
+    const submissionProjectId = projectToSubmit?.id || projectToSubmit?.slug || projectToSubmit?.name || '';
+
+    if (!submittedFiles.length) {
+      throw new Error('No project files were available to submit.');
+    }
+
+    setSkipCourseSubmittingProjectId(submissionProjectId);
+    const toastId = toast.loading(toastMessage);
+    try {
+      const payload = {
+        userId: user.uid || user.email,
+        codeContent: buildVercelFilesPayload(submittedFiles),
+      };
+
+      const response = await fetch('/api/skipcourse-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+
+      if (!response.ok) throw new Error(result?.error || 'SkipCourse rejected the submission.');
+
+      toast.success('Submission successful', { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to submit to SkipCourse', { id: toastId });
+      throw error;
+    } finally {
+      setSkipCourseSubmittingProjectId('');
+    }
   };
 
   // Theme Initialization Layer
@@ -2088,26 +2128,6 @@ export default function App() {
         submittedBy,
         submittedFiles
       }, { merge: true });
-        // Submit through our server to avoid browser CORS failures and avoid
-        // treating an unavailable local development endpoint as a submission.
-        const toastId = toast.loading("Submitting to SkipCourse...");
-        try {
-          const payload = {
-            userId: user.uid || user.email,
-            codeContent: buildVercelFilesPayload(submittedFiles),
-          };
-          const response = await fetch('/api/skipcourse-submit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result?.error || 'SkipCourse rejected the submission.');
-          toast.success("Submission successful", { id: toastId });
-        } catch (postErr) {
-          console.error(postErr);
-          toast.error("Failed to submit to SkipCourse", { id: toastId });
-        }
     } catch (err) {
       console.error(err);
       alert("Failed to submit code template files to Admin.");
@@ -2574,11 +2594,15 @@ export default function App() {
                     <div className="mt-3 flex justify-start" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={() => handleExportProjectToText(proj)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-700 text-xs font-bold transition-colors hover:bg-emerald-500/20 hover:border-emerald-400/30"
+                        onClick={() => submitProjectToSkipCourse(proj, 'Submitting project to SkipCourse...')}
+                        disabled={skipCourseSubmittingProjectId === (proj?.id || proj?.slug || proj?.name || '')}
+                        aria-busy={skipCourseSubmittingProjectId === (proj?.id || proj?.slug || proj?.name || '')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-700 text-xs font-bold transition-colors hover:bg-emerald-500/20 hover:border-emerald-400/30 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         <Save size={12} />
-                        Export SkipCourse
+                        {skipCourseSubmittingProjectId === (proj?.id || proj?.slug || proj?.name || '')
+                          ? 'Sending to SkipCourse...'
+                          : 'Send to SkipCourse'}
                       </button>
                     </div>
                   </div>
