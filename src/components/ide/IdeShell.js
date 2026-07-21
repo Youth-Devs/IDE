@@ -629,7 +629,10 @@ export default function App() {
 
     const shouldAutoSignIn = routeMode !== 'login';
     const allowAnonymousAuth = String(process.env.NEXT_PUBLIC_ENABLE_ANONYMOUS_AUTH).toLowerCase() === 'true';
-    authBootstrapInFlightRef.current = shouldAutoSignIn;
+    // Do not treat route mounting as auth completion. Firebase may still be
+    // restoring a persisted session, and redirecting while user is null causes
+    // every navigation to briefly bounce through /login.
+    authBootstrapInFlightRef.current = false;
 
     const finishAuthBootstrap = () => {
       authBootstrapInFlightRef.current = false;
@@ -643,6 +646,7 @@ export default function App() {
 
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        authBootstrapInFlightRef.current = true;
         try {
           await signInWithCustomToken(auth, __initial_auth_token);
           if (auth.currentUser) {
@@ -665,6 +669,7 @@ export default function App() {
           }
         }
       } else if (shouldAutoSignIn && allowAnonymousAuth) {
+        authBootstrapInFlightRef.current = true;
         try {
           await signInAnonymously(auth);
           if (auth.currentUser) {
@@ -673,12 +678,6 @@ export default function App() {
         } catch (e) {
           setAuthBootError('Auth service unavailable. Opening sign-in screen.');
           finishAuthBootstrap();
-        }
-      } else if (shouldAutoSignIn) {
-        // Keep the app usable even when anonymous auth is disabled in Firebase.
-        finishAuthBootstrap();
-        if (!process.env.NEXT_PUBLIC_ENABLE_ANONYMOUS_AUTH) {
-          setAuthBootError('');
         }
       }
     };
