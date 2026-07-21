@@ -2,10 +2,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Sparkles, ChevronRight, FileCode, Plus, X, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch, ArrowLeft } from 'lucide-react';
+import { Sparkles, ChevronRight, FileCode, Plus, X, CheckSquare, Square, Zap, LogOut, Folder, Sun, Moon, Users, Save, Github, ShieldAlert, Award, FileSearch } from 'lucide-react';
 import { addDoc, arrayUnion, collection, doc, getCountFromServer, getDoc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import WorkspaceHeader from '../../app/workspace/_components/WorkspaceHeader';
 import Terminal from './Terminal';
+import AdminSubmissionWorkspace from './admin/AdminSubmissionWorkspace';
+import ChangeCommitModal from './modals/ChangeCommitModal';
+import AdminSubmissionInspectorModal from './modals/AdminSubmissionInspectorModal';
+import useRouteGuard from './hooks/useRouteGuard';
 import {
   buildVercelFilesPayload,
   decodeBase64Utf8,
@@ -13,7 +17,7 @@ import {
   slugifyProjectName,
 } from '../../lib/ide-utils';
 import { buildAdminProjectPath, buildWorkspaceProjectPath, getWorkspaceRouteState, WORKSPACE_PATH, LOGIN_PATH } from '../../app/workspace/_utils/routes';
-import { Toaster, toast } from 'react-hot-toast';
+import { toast } from 'react-hot-toast';
 
 import {
   auth,
@@ -361,52 +365,20 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (authLoading) return;
-
-    const replace = (target) => {
-      if (pathname !== target) router.replace(target);
-    };
-    const clearActiveProject = () => {
-      if (currentProjectId) setCurrentProjectIdState(null);
-      sessionStorage.removeItem('current-project-id');
-    };
-
-    if (routeMode === 'root' || routeMode === 'invalid') {
-      replace(user ? WORKSPACE_PATH : LOGIN_PATH);
-      return;
-    }
-    if (routeMode === 'login') {
-      clearActiveProject();
-      if (user) replace(WORKSPACE_PATH);
-      return;
-    }
-    if (!user) {
-      // Preserve the protected destination so login can return the user to the
-      // page they originally requested. Firebase auth has finished booting at
-      // this point, so leaving the protected shell mounted only shows a dead
-      // "Opening sign-in screen" state and can trigger redirect loops.
-      const nextPath = pathname && pathname !== LOGIN_PATH
-        ? `${LOGIN_PATH}?next=${encodeURIComponent(pathname)}`
-        : LOGIN_PATH;
-      replace(nextPath);
-      return;
-    }
-    if (routeMode === 'workspace') {
-      clearActiveProject();
-      return;
-    }
-    if (isAdminRoute) {
-      if (adminLoading) return;
-      if (!canAccessAdminPanel) {
-        replace(WORKSPACE_PATH);
-        return;
-      }
-      clearActiveProject();
-      if (routeMode === 'admin-project' && adminSubmissionsResolved && !routeProject) replace('/admin');
-      return;
-    }
-  }, [authLoading, adminLoading, adminSubmissionsLoading, adminSubmissionsResolved, canAccessAdminPanel, currentProjectId, isAdmin, isAdminRoute, pathname, projectsLoading, resolvedRouteProject?.id, routeLookupComplete, routeMode, router, user]);
+  useRouteGuard({
+    authLoading,
+    pathname,
+    routeMode,
+    user,
+    router,
+    currentProjectId,
+    setCurrentProjectId: setCurrentProjectIdState,
+    isAdminRoute,
+    adminLoading,
+    canAccessAdminPanel,
+    adminSubmissionsResolved,
+    routeProject,
+  });
 
   // Select a resolved project without changing the browser URL. Project routes
   // must remain stable while Firestore and the IDE shell finish loading.
@@ -2218,109 +2190,7 @@ export default function App() {
     const adminSubmissionFiles = Array.isArray(adminSubmissionProjectData?.submittedFiles) && adminSubmissionProjectData.submittedFiles.length > 0
       ? adminSubmissionProjectData.submittedFiles
       : Array.isArray(adminSubmissionProjectData?.files) ? adminSubmissionProjectData.files : [];
-    const adminSubmittedAt = adminSubmissionProjectData?.submittedAt
-      ? new Date(adminSubmissionProjectData.submittedAt).toLocaleString()
-      : '';
-    const adminPreviewHtml = getBundledPreviewCodeFromFiles(adminSubmissionFiles);
-
-    if (!adminSubmissionProjectData) {
-      return (
-        <div className="h-screen w-screen flex items-center justify-center bg-[#050b08] text-emerald-300 font-mono text-xs">
-          Resolving submission workspace...
-        </div>
-      );
-    }
-
-    return (
-      <div className={`flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 ${theme === 'dark' ? 'bg-[#050b08] text-slate-200' : 'bg-[#eef7f1] text-slate-800'}`}>
-        <Toaster />        <header className="flex h-14 items-center justify-between px-4 border-b z-10 shrink-0 transition-colors border-emerald-900/25 bg-[#07120c]/70 backdrop-blur-md">
-          <div className="flex items-center gap-3 max-w-[70%] overflow-hidden">
-            <button onClick={() => { if (pathname !== '/admin') router.push('/admin'); }} className={`p-1.5 rounded-lg transition-colors shrink-0 ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-emerald-50 text-emerald-700 hover:text-emerald-900'}`} title="Return to Admin Dashboard">
-              <ArrowLeft size={14} />
-            </button>
-            <div className={`h-5 w-px shrink-0 ${theme === 'dark' ? 'bg-slate-800' : 'bg-emerald-200'}`} />
-            <div className="min-w-0">
-              <div className="font-bold text-xs tracking-wider bg-gradient-to-r from-emerald-300 to-lime-200 bg-clip-text text-transparent uppercase font-mono truncate">
-                {adminSubmissionProjectData.name || 'Submitted Project'}
-              </div>
-              <div className={`text-[10px] font-mono truncate ${theme === 'dark' ? 'text-slate-500' : 'text-emerald-700'}`}>
-                {adminSubmissionProjectData.submitted ? 'Submitted' : 'In Review'}
-                {adminSubmittedAt ? ` • ${adminSubmittedAt}` : ''}
-                {adminSubmissionProjectData.submittedBy ? ` • by ${adminSubmissionProjectData.submittedBy}` : ''}
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main className="flex-1 min-h-0 flex">
-          <section className="w-72 shrink-0 border-r border-emerald-900/25 bg-[#07120c]/45 flex flex-col min-h-0">
-            <div className="px-4 py-3 border-b border-emerald-900/20">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Submission Files</div>
-              <div className="text-[11px] font-mono text-slate-400 mt-1">{adminSubmissionFiles.length} files</div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
-              {adminSubmissionFiles.map((file) => (
-                <button
-                  key={file.id || file.name}
-                  type="button"
-                  onClick={() => {
-                    setAdminActiveFileName(file.name || '');
-                    setAdminActiveFileContent(typeof file.content === 'string' ? file.content : '');
-                  }}
-                  className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${adminActiveFileName === file.name
-                    ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
-                    : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/60' : 'text-slate-600 hover:bg-emerald-50'
-                    }`}
-                >
-                  <FileCode size={13} />
-                  <span className="truncate">{file.name || 'Untitled file'}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="flex-1 min-w-0 flex flex-col bg-[#050b08]">
-            <div className="h-12 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0 gap-3">
-              <div className="flex items-center gap-1 rounded-lg border border-emerald-900/30 bg-[#050b08] p-1">
-                <button
-                  type="button"
-                  onClick={() => setAdminViewTab('code')}
-                  className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition ${adminViewTab === 'code' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                >
-                  Code
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAdminViewTab('preview')}
-                  className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition ${adminViewTab === 'preview' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                >
-                  Preview
-                </button>
-              </div>
-              <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Read Only</span>
-            </div>
-
-            {adminViewTab === 'code' ? (
-              <div className="flex-1 p-4 overflow-auto custom-scrollbar">
-                <div className="text-[11px] font-mono text-slate-400 mb-3">{adminActiveFileName || 'Select a file to inspect'}</div>
-                <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text selection:bg-rose-500/30 selection:text-white">
-                  {adminActiveFileContent || 'No content found inside this file segment.'}
-                </pre>
-              </div>
-            ) : (
-              <div className="flex-1 w-full bg-[#050b08] relative">
-                <iframe
-                  title="Admin Submission Preview"
-                  srcDoc={adminPreviewHtml || previewPlaceholderHtml}
-                  sandbox="allow-scripts"
-                  className="absolute inset-0 w-full h-full border-none"
-                />
-              </div>
-            )}
-          </section>
-        </main>
-      </div>
-    );
+    return <AdminSubmissionWorkspace project={adminSubmissionProjectData} theme={theme} onBack={() => router.push('/admin')} activeFileName={adminActiveFileName} activeFileContent={adminActiveFileContent} onSelectFile={(file) => { setAdminActiveFileName(file.name || ''); setAdminActiveFileContent(typeof file.content === 'string' ? file.content : ''); }} viewTab={adminViewTab} onViewTabChange={setAdminViewTab} previewHtml={getBundledPreviewCodeFromFiles(adminSubmissionFiles)} previewPlaceholderHtml={previewPlaceholderHtml} />;
   }
 
   // --- RENDER 2: DASHBOARD VIEW PANEL ---
@@ -3028,116 +2898,8 @@ export default function App() {
         </section>
       </footer>
 
-      {/* CUSTOM COMMIT CHANGE POP-UP MODAL UI (NO WINDOW ALERTS USED) */}
-      {showChangeModal && (
-        <div className="fixed inset-0 bg-[#050b08]/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="w-full max-w-md border p-6 rounded-2xl shadow-2xl transition-all bg-[#08140d] border-emerald-900/30">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-8 w-8 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-500">
-                <Save size={16} />
-              </div>
-              <h3 className={`text-base font-bold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                {activeProjectData?.githubRepo ? 'Push GitHub Commit' : 'Push Collaborative Change'}
-              </h3>
-            </div>
-
-            <p className={`text-xs mb-4 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
-              Please enter a brief name or description for this changeset. Teammates will see this description in real-time.
-            </p>
-
-            <form onSubmit={handleConfirmChangeCommit} className="flex flex-col gap-4">
-              <input
-                type="text"
-                placeholder="e.g., Fix responsive layout sizing"
-                value={changeNameInput}
-                onChange={e => setChangeNameInput(e.target.value)}
-                required
-                autoFocus
-                className={`w-full border text-xs px-3 py-2.5 rounded-lg outline-none transition-colors ${theme === 'dark'
-                  ? 'bg-[#050b08] border-emerald-900/35 focus:border-emerald-500 text-slate-200'
-                  : 'bg-white border-emerald-200 focus:border-emerald-500 text-slate-900'
-                  }`}
-              />
-
-              <div className="flex gap-2 justify-end text-xs font-bold">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowChangeModal(false);
-                    setPendingFilesToSync(null);
-                  }}
-                  className="px-4 py-2.5 rounded-lg border transition border-emerald-900/30 hover:bg-[#0b1810] text-slate-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!changeNameInput.trim()}
-                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg transition shadow-md shadow-emerald-950/20"
-                >
-                  Confirm & Push
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ADMIN DETAILED SUBMISSION FILE INSPECTOR MODAL UI */}
-      {selectedAdminProjectFiles && (
-        <div className="fixed inset-0 bg-[#050b08]/90 backdrop-blur-md flex items-center justify-center p-6 z-50 animate-fade-in">
-          <div className="w-full h-[90vh] max-w-5xl border rounded-2xl flex flex-col overflow-hidden bg-[#08140d] border-emerald-900/30 shadow-2xl">
-            <header className="h-12 border-b border-emerald-900/30 px-4 flex items-center justify-between bg-[#050b08] shrink-0">
-              <div className="flex items-center gap-2">
-                <Award className="text-rose-400" size={16} />
-                <span className="text-xs font-bold text-slate-200">Admin Live Grading Sandbox</span>
-              </div>
-              <button
-                onClick={() => setSelectedAdminProjectFiles(null)}
-                className="text-slate-500 hover:text-white transition"
-              >
-                <X size={16} />
-              </button>
-            </header>
-
-            <div className="flex-1 flex min-h-0">
-              {/* Submission Files list */}
-              <div className="w-64 border-r border-emerald-900/30 bg-[#050b08] p-3 overflow-y-auto shrink-0 flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Team Files</span>
-                {selectedAdminProjectFiles.map(file => (
-                  <div
-                    key={file.id || file.name}
-                    onClick={() => {
-                      setAdminActiveFileName(file.name);
-                      setAdminActiveFileContent(file.content);
-                    }}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs font-mono transition ${adminActiveFileName === file.name
-                      ? 'bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20'
-                      : theme === 'dark' ? 'text-slate-400 hover:bg-slate-900/60' : 'text-slate-600 hover:bg-emerald-50'
-                      }`}
-                  >
-                    <FileCode size={13} />
-                    <span className="truncate">{file.name}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* View inspector panel */}
-              <div className="flex-1 flex flex-col bg-[#050b08] min-w-0">
-                <div className="h-9 px-4 border-b border-emerald-900/30 bg-[#08140d]/60 flex items-center justify-between shrink-0">
-                  <span className="text-[11px] font-mono text-slate-400">{adminActiveFileName || "Select a file to inspect"}</span>
-                </div>
-
-                <div className="flex-1 p-4 overflow-auto custom-scrollbar">
-                  <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap select-text selection:bg-rose-500/30 selection:text-white">
-                    {adminActiveFileContent || "No content found inside this file segment."}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ChangeCommitModal open={showChangeModal} theme={theme} project={activeProjectData} value={changeNameInput} onChange={setChangeNameInput} onCancel={() => { setShowChangeModal(false); setPendingFilesToSync(null); }} onConfirm={handleConfirmChangeCommit} />
+      <AdminSubmissionInspectorModal files={selectedAdminProjectFiles} theme={theme} activeFileName={adminActiveFileName} activeFileContent={adminActiveFileContent} onSelectFile={(file) => { setAdminActiveFileName(file.name || ''); setAdminActiveFileContent(file.content || ''); }} onClose={() => setSelectedAdminProjectFiles(null)} />
 
     </div>
   );
