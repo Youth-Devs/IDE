@@ -14,10 +14,14 @@ service cloud.firestore {
     function isProjectMember(projectId) {
       return isAuthenticated() &&
         exists(/databases/$(database)/documents/projects/$(projectId)) &&
-        get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids != null &&
         (
-          request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids ||
           (
+            request.auth != null &&
+            get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids != null &&
+            request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.memberUids
+          ) ||
+          (
+            request.auth != null &&
             request.auth.token.email != null &&
             get(/databases/$(database)/documents/projects/$(projectId)).data.memberEmails != null &&
             request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.memberEmails
@@ -76,6 +80,18 @@ service cloud.firestore {
         && request.resource.data.userId == resource.data.userId
         && request.resource.data.slug == resource.data.slug
       ) || (
+        // Any project member may submit the team's current project for review,
+        // but cannot change unrelated project fields through this permission.
+        isProjectMember(projectId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            'isHackathonProject',
+            'submitted',
+            'submittedAt',
+            'submittedBy',
+            'submittedFiles'
+          ])
+      ) || (
         isAuthenticated() && isPresenceOnlyUpdate()
       );
 
@@ -95,7 +111,12 @@ service cloud.firestore {
 
     match /adminSubmissions/{projectId} {
       allow read: if isAdmin() || isProjectMember(projectId);
-      allow create, update: if isProjectMember(projectId) && request.resource.data.projectId == projectId;
+      // Admins can review and submit legacy projects that do not list their
+      // account in memberUids/memberEmails; members remain limited to their
+      // own project's submission document.
+      allow create, update: if isAdmin() || (
+        isProjectMember(projectId) && request.resource.data.projectId == projectId
+      );
       allow delete: if isAdmin();
     }
   }

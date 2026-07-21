@@ -770,8 +770,15 @@ export default function App() {
         setSuperchargeUses(data.superchargeUses || 0);
         setCooldownEndTime(data.cooldownEndTime || null);
 
-        // Mark admin based on Firestore configurations
-        setIsAdmin(data.isAdmin || false);
+        // Mark admin based on Firestore configurations. The user count is an
+        // admin-only statistic, so non-admin clients never request it.
+        const hasAdminAccess = data.isAdmin === true;
+        setIsAdmin(hasAdminAccess);
+        if (hasAdminAccess) {
+          fetchTotalUsersCount();
+        } else {
+          setTotalUsers(null);
+        }
       } else {
         setIsAdmin(false);
         try {
@@ -780,7 +787,6 @@ export default function App() {
           console.error("Failed to initialize user document:", err);
         }
       }
-      fetchTotalUsersCount();
       setAdminLoading(false);
     }, (error) => {
       console.error('User profile listener failed:', error?.message || error);
@@ -833,8 +839,6 @@ export default function App() {
       const emailQuery = query(collection(db, 'projects'), where('memberEmails', 'array-contains', userEmail));
       unsubscribers.push(onSnapshot(emailQuery, (snapshot) => applySnapshot('email', emailProjects, snapshot), (error) => failSource('email', error)));
     }
-
-    fetchTotalUsersCount();
 
     return () => {
       unsubProfile();
@@ -2029,17 +2033,23 @@ export default function App() {
     setWorkspaceError('');
 
     try {
-      const batchPromises = projects.map(async (proj) => {
-        const pRef = doc(db, 'projects', proj.id);
-        if (proj.id === projectId) {
-          // Toggle project hackathon flag
-          await updateDoc(pRef, { isHackathonProject: !currentStatus });
-        } else if (proj.isHackathonProject) {
-          // Remove from other projects to fulfill "up to one project" constraint
-          await updateDoc(pRef, { isHackathonProject: false });
-        }
+      // Update the selected project first. A stale or inaccessible legacy
+      // project must not prevent this project from being deemed for submission.
+      await updateDoc(doc(db, 'projects', projectId), {
+        isHackathonProject: !currentStatus,
       });
-      await Promise.all(batchPromises);
+
+      if (!currentStatus) {
+        const cleanupResults = await Promise.allSettled(
+          projects
+            .filter((project) => project.id !== projectId && project.isHackathonProject)
+            .map((project) => updateDoc(doc(db, 'projects', project.id), { isHackathonProject: false }))
+        );
+        const cleanupFailures = cleanupResults.filter((result) => result.status === 'rejected');
+        if (cleanupFailures.length) {
+          console.warn('Some previous hackathon selections could not be cleared:', cleanupFailures);
+        }
+      }
     } catch (err) {
       console.error(err);
       setWorkspaceError("Failed to update Hackathon configuration status.");
@@ -2078,25 +2088,21 @@ export default function App() {
         submittedBy,
         submittedFiles
       }, { merge: true });
-        // Send payloads to SkipCourse endpoints
+        // Submit through our server to avoid browser CORS failures and avoid
+        // treating an unavailable local development endpoint as a submission.
         const toastId = toast.loading("Submitting to SkipCourse...");
         try {
           const payload = {
             userId: user.uid || user.email,
-            codeContent: buildVercelFilesPayload(files),
+            codeContent: buildVercelFilesPayload(submittedFiles),
           };
-          await Promise.all([
-            fetch("https://deepvalidation.skipcourse.com/api/submit", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            }),
-            fetch("http://localhost:5173/api/submit", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            }),
-          ]);
+          const response = await fetch('/api/skipcourse-submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result?.error || 'SkipCourse rejected the submission.');
           toast.success("Submission successful", { id: toastId });
         } catch (postErr) {
           console.error(postErr);
@@ -2244,10 +2250,12 @@ export default function App() {
               </button>
             )}
 
-            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border ${theme === 'dark' ? 'bg-emerald-950/25 border-emerald-900/40 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
-              <Users size={12} />
-              <span>IDE Users: <b className="font-mono font-bold">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
-            </div>
+            {isAdmin && (
+              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium border ${theme === 'dark' ? 'bg-emerald-950/25 border-emerald-900/40 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                <Users size={12} />
+                <span>IDE Users: <b className="font-mono font-bold">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
+              </div>
+            )}
 
             <button
               onClick={toggleTheme}
@@ -2591,6 +2599,7 @@ export default function App() {
         user={user}
         activeProjectData={activeProjectData}
         totalUsers={totalUsers}
+        isAdmin={isAdmin}
         inviteStatus={inviteStatus}
         teammateEmailInput={teammateEmailInput}
         onBackToDashboard={() => setCurrentProjectId(null)}

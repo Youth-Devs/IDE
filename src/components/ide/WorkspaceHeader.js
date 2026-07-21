@@ -8,6 +8,7 @@ export default function WorkspaceHeader({
   user,
   activeProjectData,
   totalUsers,
+  isAdmin,
   inviteStatus,
   teammateEmailInput,
   onBackToDashboard,
@@ -86,10 +87,12 @@ export default function WorkspaceHeader({
           </span>
         )}
 
-        <div className={`flex items-center gap-1 text-[10px] font-semibold border px-3 py-1 rounded-full shrink-0 ${theme === 'dark' ? 'bg-emerald-950/25 border-emerald-900/40 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
-          <Users size={11} />
-          <span>IDE Users: <b className="font-mono">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
-        </div>
+        {isAdmin && (
+          <div className={`flex items-center gap-1 text-[10px] font-semibold border px-3 py-1 rounded-full shrink-0 ${theme === 'dark' ? 'bg-emerald-950/25 border-emerald-900/40 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+            <Users size={11} />
+            <span>IDE Users: <b className="font-mono">{totalUsers !== undefined && totalUsers !== null ? totalUsers : '...'}</b></span>
+          </div>
+        )}
 
         <button
           onClick={onToggleTheme}
